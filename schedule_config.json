@@ -1,0 +1,52 @@
+{
+  "professors": [
+    "dr inż. Wojciech Lewandowski",
+    "mgr inż. Grzegorz Osiński",
+    "dr inż. Tomasz Karasiewicz",
+    "dr hab. Magdalena Redo",
+    "mgr Monika Bartczak",
+    "dr Andrzej Marjański",
+    "dr Lidia Mosińska",
+    "dr Ewa Jankowska",
+    "mgr inż. Adam Krzywiec",
+    "dr inż. Piotr Woźniak",
+    "dr Tomasz Janicki",
+    "mgr Martyna Duda"
+  ],
+  "locations": [
+    "Online",
+    "A005",
+    "A202"
+  ],
+  "classnames": [
+    "Podstawy Rysunku Technicznego",
+    "Arkusze Kalkulacyjne",
+    "Inżynieria Materiałowa",
+    "Finanse",
+    "Ochrona Własności Intelektualnej",
+    "Zarządzanie",
+    "Elementy Elektrotechniki I Elektroniki",
+    "Podstawy Ekonomii"
+  ],
+  "dates": [
+    "2025-10-19",
+    "2025-10-24",
+    "2025-11-07",
+    "2025-11-08",
+    "2025-11-09",
+    "2025-11-21",
+    "2025-11-22",
+    "2025-11-28"    
+  ],
+  "times": [
+    "8:00",
+    "9:40",
+    "11:20",
+    "13:10",
+    "15:00",
+    "16:40",
+    "18:20",
+    "20:00"
+  ],
+  "channelId": "1429221945441915000"
+}
