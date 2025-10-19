@@ -4,34 +4,61 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Show all available commands and their descriptions'),
+    .setDescription('Show all available commands with detailed descriptions'),
 
   async execute(interaction) {
-    try {
-      // Defer reply to prevent interaction timeout
-      await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle('📘 WSB Engi Bot — Help Menu')
+      .setColor(0x5865F2)
+      .setDescription('Here’s a detailed overview of all commands grouped by category:')
 
-      const embed = new EmbedBuilder()
-        .setTitle('📘 Uni Group Bot — Help Menu')
-        .setColor(0x5865F2)
-        .setDescription('Here’s a list of all commands and what they do:')
-        .addFields(
-          { name: '🎭 Reaction Roles', value: '`/createdropdown` — Create dropdown menus for role selection.' },
-          { name: '📅 Schedules', value: '`/schedule_menu` — Create new schedules.\n`/schedule_edit` — Edit an existing schedule.\n`/schedule_delete` — Delete a schedule.\n`/schedule_copy` — Duplicate an existing schedule.\n`/schedule_list` — View all schedules.' },
-          { name: '📝 Homework', value: '`/homework_add` — Add new homework.\n`/homework_edit` — Edit existing homework.\n`/homework_delete` — Remove a homework listing.\n`/homework_copy` — Duplicate a homework entry.' },
-          { name: '⚙️ Admin-only setup', value: '`/schedule_config` — Configure professors, locations, etc.\n`/createdropdown` — Manage reaction role dropdowns.' }
-        )
-        .setFooter({ text: 'Use commands with / in any server channel where the bot is allowed.' })
-        .setTimestamp();
+      // Reaction Roles
+      .addFields(
+        { 
+          name: '🎭 Reaction Roles', 
+          value: [
+            '`/createdropdown <category> <options> <roleids>` — Create a dropdown menu for role assignment.',
+            '`/listdropdowns` — List all saved dropdown menus.',
+            '`/deletedropdown <id>` — Delete a dropdown menu by ID.'
+          ].join('\n') 
+        },
 
-      await interaction.editReply({ embeds: [embed] });
-    } catch (err) {
-      console.error('Error in /help command:', err);
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: '❌ An error occurred.', ephemeral: true });
-      } else {
-        await interaction.editReply({ content: '❌ An error occurred.' });
-      }
-    }
+        // Class Schedules
+        { 
+          name: '📅 Class Schedules', 
+          value: [
+            '`/schedule menu` — Create a new class schedule (Admin only).',
+            '`/schedule edit <id> <field> <value>` — Edit a schedule entry (Admin only).',
+            '`/schedule delete <id>` — Delete a schedule entry (Admin only).',
+            '`/schedule copy <id>` — Copy an existing schedule entry (Admin only).',
+            '`/schedule list` — View all schedules.'
+          ].join('\n')
+        },
+
+        // Homework
+        { 
+          name: '📝 Homework', 
+          value: [
+            '`/homework add <title> <desc> <due_date> <type>` — Add a homework entry (Admin only).',
+            '`/homework edit <id> <field> <value>` — Edit an existing homework (Admin only).',
+            '`/homework delete <id>` — Delete a homework entry (Admin only).',
+            '`/homework copy <id>` — Copy a homework entry (Admin only).',
+            '`/homework list` — List all homework entries.'
+          ].join('\n')
+        },
+
+        // Admin Setup
+        { 
+          name: '⚙️ Admin Setup', 
+          value: [
+            '`/schedule_config` — Configure channels, professors, locations, etc.',
+            '`/createdropdown` — Manage role dropdown menus.'
+          ].join('\n')
+        }
+      )
+      .setFooter({ text: 'Use / in any server channel where the bot is allowed.' })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
   },
 };
