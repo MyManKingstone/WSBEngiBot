@@ -118,5 +118,17 @@
     "messageId": "1429536419638018089",
     "createdBy": "768503906149728296",
     "createdAt": "2025-10-19T18:27:22.073Z"
+  },
+  "class-1760898676765": {
+    "name": "Inżynieria Materiałowa",
+    "professor": "dr inż. Tomasz Karasiewicz",
+    "type": "Wyklad",
+    "date": "2025-11-08",
+    "time": "15:00",
+    "location": "Online",
+    "channelId": "1429221945441915000",
+    "messageId": "1429537404087173342",
+    "createdBy": "768503906149728296",
+    "createdAt": "2025-10-19T18:31:16.765Z"
   }
 }
