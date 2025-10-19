@@ -12,18 +12,14 @@ const {
     Routes
 } = require('discord.js');
 const express = require('express');
-const fetch = require('node-fetch');
 
-const GITHUB_OWNER = process.env.GITHUB_OWNER;
-const GITHUB_REPO = process.env.GITHUB_REPO;
-const GITHUB_BRANCH = process.env.GITHUB_BRANCH;
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-
-// Ensure fetch() works in all Node environments
-import('node-fetch')
-  .then(({ default: fetch }) => global.fetch = fetch)
-  .catch(() => console.warn('⚠️ Could not load node-fetch, using built-in if available'));
-
+// ✅ Universal fetch fix for CommonJS (works on Render)
+let fetch;
+try {
+    fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+} catch (e) {
+    console.warn('⚠️ Could not initialize node-fetch:', e);
+}
 // ---------- GitHub JSON helpers ----------
 async function fetchJSON(filePath) {
     const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}?ref=${GITHUB_BRANCH}`;
