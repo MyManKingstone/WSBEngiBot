@@ -1,4 +1,4 @@
-require('dotenv').config();
+
 const {
     Client,
     GatewayIntentBits,
@@ -12,6 +12,7 @@ const {
     Routes
 } = require('discord.js');
 const express = require('express');
+const GITHUB_OWNER = process.env.GITHUB_OWNER;
 
 // ✅ Universal fetch fix for CommonJS (works on Render)
 let fetch;
