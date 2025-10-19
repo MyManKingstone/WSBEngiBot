@@ -106,5 +106,17 @@
     "messageId": "1429536273793814629",
     "createdBy": "768503906149728296",
     "createdAt": "2025-10-19T18:26:47.462Z"
+  },
+  "class-1760898442073": {
+    "name": "Elementy Elektrotechniki I Elektroniki",
+    "professor": "dr Lidia Mosińska",
+    "type": "Wyklad",
+    "date": "2025-11-08",
+    "time": "13:10",
+    "location": "Online",
+    "channelId": "1429221945441915000",
+    "messageId": "1429536419638018089",
+    "createdBy": "768503906149728296",
+    "createdAt": "2025-10-19T18:27:22.073Z"
   }
 }
