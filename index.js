@@ -13,6 +13,8 @@ const {
 } = require('discord.js');
 const express = require('express');
 const GITHUB_OWNER = process.env.GITHUB_OWNER;
+const GITHUB_REPO = process.env.GITHUB_REPO;
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH;
 
 // ✅ Universal fetch fix for CommonJS (works on Render)
 let fetch;
