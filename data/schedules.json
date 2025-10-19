@@ -82,5 +82,17 @@
     "messageId": "1429534280916271309",
     "createdBy": "768503906149728296",
     "createdAt": "2025-10-19T18:18:52.242Z"
+  },
+  "class-1760898215749": {
+    "name": "Zarządzanie",
+    "professor": "dr Andrzej Marjański",
+    "type": "Wyklad",
+    "date": "2025-11-08",
+    "time": "9:40",
+    "location": "Online",
+    "channelId": "1429221945441915000",
+    "messageId": "1429535470379073638",
+    "createdBy": "768503906149728296",
+    "createdAt": "2025-10-19T18:23:35.750Z"
   }
 }
