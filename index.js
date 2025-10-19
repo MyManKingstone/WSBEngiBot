@@ -491,9 +491,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// ---------- Temporary menu state ----------
-const menuState = {}; // keyed by userId for schedule builder sessions
-
 // ---------- Schedule Menu Command ----------
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand() && !interaction.isStringSelectMenu() && !interaction.isButton()) return;
