@@ -23,66 +23,78 @@ module.exports = {
   ],
 
   async execute(interaction) {
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-      return interaction.reply({ content: '🚫 Admins only.', ephemeral: true });
-    }
-
-    const cmd = interaction.commandName;
-
-    if (cmd === 'createdropdown') {
-      const category = interaction.options.getString('category');
-      const description = interaction.options.getString('description') || 'Select your roles:';
-      const optionsInput = interaction.options.getString('options').split(',').map(s => s.trim()).filter(Boolean);
-      const roleIds = interaction.options.getString('roleids').split(',').map(s => s.trim()).filter(Boolean);
-
-      if (optionsInput.length !== roleIds.length) {
-        return interaction.reply({ content: '⚠️ Options and role IDs count must match.', ephemeral: true });
+    try {
+      if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+        return interaction.reply({ content: '🚫 Admins only.', ephemeral: true });
       }
 
-      const customId = `dropdown-${Date.now()}`;
-      const embed = new EmbedBuilder().setTitle(`🎓 ${category}`).setDescription(description).setColor(0x5865f2);
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId(customId)
-        .setPlaceholder('Select your roles')
-        .setMinValues(0)
-        .setMaxValues(optionsInput.length)
-        .addOptions(optionsInput.map((label, i) => ({ label, value: String(i), description: `Gives ${label} role` })));
+      await interaction.deferReply({ ephemeral: true });
 
-      const row = new ActionRowBuilder().addComponents(menu);
-      const msg = await interaction.channel.send({ embeds: [embed], components: [row] });
+      const cmd = interaction.commandName;
 
-      dropdownMappings[customId] = {
-        messageId: msg.id,
-        channelId: msg.channel.id,
-        roleIds,
-        options: optionsInput
-      };
+      if (cmd === 'createdropdown') {
+        const category = interaction.options.getString('category');
+        const description = interaction.options.getString('description') || 'Select your roles:';
+        const optionsInput = interaction.options.getString('options').split(',').map(s => s.trim()).filter(Boolean);
+        const roleIds = interaction.options.getString('roleids').split(',').map(s => s.trim()).filter(Boolean);
 
-      await saveJSON(DROPDOWN_FILE, dropdownMappings);
-      return interaction.reply({ content: `✅ Dropdown created! ID: \`${customId}\``, ephemeral: true });
-    }
+        if (optionsInput.length !== roleIds.length) {
+          return interaction.editReply({ content: '⚠️ Options and role IDs count must match.' });
+        }
 
-    if (cmd === 'listdropdowns') {
-      const ids = Object.keys(dropdownMappings);
-      if (!ids.length) return interaction.reply({ content: '📭 No dropdowns found.', ephemeral: true });
+        const customId = `dropdown-${Date.now()}`;
+        const embed = new EmbedBuilder().setTitle(`🎓 ${category}`).setDescription(description).setColor(0x5865f2);
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId(customId)
+          .setPlaceholder('Select your roles')
+          .setMinValues(0)
+          .setMaxValues(optionsInput.length)
+          .addOptions(optionsInput.map((label, i) => ({ label, value: String(i), description: `Gives ${label} role` })));
 
-      const list = ids.map(id => `• **${id}** → ${dropdownMappings[id].options.join(', ')}`).join('\n');
-      return interaction.reply({ content: `📋 Dropdowns:\n${list}`, ephemeral: true });
-    }
+        const row = new ActionRowBuilder().addComponents(menu);
+        const msg = await interaction.channel.send({ embeds: [embed], components: [row] });
 
-    if (cmd === 'deletedropdown') {
-      const id = interaction.options.getString('id');
-      if (!dropdownMappings[id]) return interaction.reply({ content: '⚠️ Invalid dropdown ID.', ephemeral: true });
+        dropdownMappings[customId] = {
+          messageId: msg.id,
+          channelId: msg.channel.id,
+          roleIds,
+          options: optionsInput
+        };
 
-      try {
-        const ch = await interaction.client.channels.fetch(dropdownMappings[id].channelId);
-        const m = await ch.messages.fetch(dropdownMappings[id].messageId);
-        await m.delete();
-      } catch {}
+        await saveJSON(DROPDOWN_FILE, dropdownMappings);
+        return interaction.editReply({ content: `✅ Dropdown created! ID: \`${customId}\`` });
+      }
 
-      delete dropdownMappings[id];
-      await saveJSON(DROPDOWN_FILE, dropdownMappings);
-      return interaction.reply({ content: `✅ Dropdown \`${id}\` deleted.`, ephemeral: true });
+      if (cmd === 'listdropdowns') {
+        const ids = Object.keys(dropdownMappings);
+        if (!ids.length) return interaction.editReply({ content: '📭 No dropdowns found.' });
+
+        const list = ids.map(id => `• **${id}** → ${dropdownMappings[id].options.join(', ')}`).join('\n');
+        return interaction.editReply({ content: `📋 Dropdowns:\n${list}` });
+      }
+
+      if (cmd === 'deletedropdown') {
+        const id = interaction.options.getString('id');
+        if (!dropdownMappings[id]) return interaction.editReply({ content: '⚠️ Invalid dropdown ID.' });
+
+        try {
+          const ch = await interaction.client.channels.fetch(dropdownMappings[id].channelId);
+          const m = await ch.messages.fetch(dropdownMappings[id].messageId);
+          await m.delete();
+        } catch {}
+
+        delete dropdownMappings[id];
+        await saveJSON(DROPDOWN_FILE, dropdownMappings);
+        return interaction.editReply({ content: `✅ Dropdown \`${id}\` deleted.` });
+      }
+
+    } catch (err) {
+      console.error('Error in dropdown command:', err);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ An error occurred.', ephemeral: true });
+      } else {
+        await interaction.editReply({ content: '❌ An error occurred.' });
+      }
     }
   }
 };
