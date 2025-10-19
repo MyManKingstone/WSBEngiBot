@@ -1,3 +1,17 @@
-"scripts": {
-  "start": "node index.js"
+{
+  "name": "wsbengibot",
+  "version": "1.0.0",
+  "description": "Discord bot for WSB Engineering",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.0",
+    "express": "^4.21.0",
+    "node-fetch": "^3.3.2"
+  }
 }
