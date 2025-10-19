@@ -1,6 +1,6 @@
 // commands/homework.js
-const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
-const { homeworks, scheduleConfig, saveJSON, HOMEWORK_FILE, homeworkStatus } = require('../utils/storage');
+const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, PermissionsBitField, ComponentType } = require('discord.js');
+const { homeworks, scheduleConfig, saveJSON, HOMEWORK_FILE, homeworkStatus, saveStatusJSON, HOMEWORK_STATUS_FILE } = require('../utils/storage');
 
 function generateId() {
   return `hw-${Math.random().toString(36).slice(2, 8)}`;
@@ -10,37 +10,25 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('homework')
     .setDescription('Manage homework and assignments')
-    .addSubcommand(sub =>
-      sub.setName('add')
-        .setDescription('Admin only — add a new homework')
-        .addStringOption(opt => opt.setName('title').setDescription('Homework title').setRequired(true))
-        .addStringOption(opt => opt.setName('description').setDescription('Homework details').setRequired(true))
-        .addStringOption(opt => opt.setName('due_date').setDescription('Due date (e.g. 2025-11-03)').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('edit')
-        .setDescription('Edit an existing homework')
-        .addStringOption(opt => opt.setName('id').setDescription('Homework ID').setRequired(true))
-        .addStringOption(opt => opt.setName('field').setDescription('Field to edit').setRequired(true)
-          .addChoices(
-            { name: 'Title', value: 'title' },
-            { name: 'Description', value: 'description' },
-            { name: 'Due Date', value: 'due_date' }
-          ))
-        .addStringOption(opt => opt.setName('value').setDescription('New value').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('delete')
-        .setDescription('Delete a homework entry')
-        .addStringOption(opt => opt.setName('id').setDescription('Homework ID').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('copy')
-        .setDescription('Copy a homework entry')
-        .addStringOption(opt => opt.setName('id').setDescription('Homework ID to copy').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('list')
-        .setDescription('List all homework entries'))
-    .addSubcommand(sub =>
-      sub.setName('refresh')
-        .setDescription('Retroactively update all homework embeds to the current style')),
+    .addSubcommand(sub => sub.setName('add').setDescription('Admin only — add a new homework')
+      .addStringOption(opt => opt.setName('title').setDescription('Homework title').setRequired(true))
+      .addStringOption(opt => opt.setName('description').setDescription('Homework details').setRequired(true))
+      .addStringOption(opt => opt.setName('due_date').setDescription('Due date (e.g. 2025-11-03)').setRequired(true)))
+    .addSubcommand(sub => sub.setName('edit').setDescription('Edit an existing homework')
+      .addStringOption(opt => opt.setName('id').setDescription('Homework ID').setRequired(true))
+      .addStringOption(opt => opt.setName('field').setDescription('Field to edit').setRequired(true)
+        .addChoices(
+          { name: 'Title', value: 'title' },
+          { name: 'Description', value: 'description' },
+          { name: 'Due Date', value: 'due_date' }
+        ))
+      .addStringOption(opt => opt.setName('value').setDescription('New value').setRequired(true)))
+    .addSubcommand(sub => sub.setName('delete').setDescription('Delete a homework entry')
+      .addStringOption(opt => opt.setName('id').setDescription('Homework ID').setRequired(true)))
+    .addSubcommand(sub => sub.setName('copy').setDescription('Copy a homework entry')
+      .addStringOption(opt => opt.setName('id').setDescription('Homework ID to copy').setRequired(true)))
+    .addSubcommand(sub => sub.setName('list').setDescription('List all homework entries'))
+    .addSubcommand(sub => sub.setName('refresh').setDescription('Retroactively update all homework embeds to the current style')),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -71,6 +59,15 @@ module.exports = {
       return { embed, row };
     };
 
+    // ---- Handle the button click globally ----
+    if (interaction.isButton() && interaction.customId.startsWith('markdone-')) {
+      const hwId = interaction.customId.split('-')[1];
+      if (!homeworkStatus[hwId]) homeworkStatus[hwId] = {};
+      homeworkStatus[hwId][interaction.user.id] = true;
+      await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
+      return interaction.reply({ content: '✅ Marked as done for you!', ephemeral: true });
+    }
+
     switch(sub) {
       case 'add': {
         const title = interaction.options.getString('title');
@@ -79,7 +76,6 @@ module.exports = {
         const id = generateId();
 
         const { embed, row } = createEmbedRow(id, title, description, dueDate);
-
         const channel = await interaction.guild.channels.fetch(scheduleConfig.homeworkChannelId).catch(() => null);
         if (!channel) return interaction.reply({ content: '⚠️ No homework channel configured.', ephemeral: true });
 
@@ -87,6 +83,7 @@ module.exports = {
         homeworks[id] = { id, title, description, due_date: dueDate, messageId: msg.id, channelId: msg.channel.id };
         homeworkStatus[id] = {};
         saveJSON(HOMEWORK_FILE, homeworks);
+        await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
 
         return interaction.reply({ content: `✅ Homework added with ID **${id}**`, ephemeral: true });
       }
@@ -126,6 +123,7 @@ module.exports = {
         delete homeworks[id];
         delete homeworkStatus[id];
         saveJSON(HOMEWORK_FILE, homeworks);
+        await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
         return interaction.reply({ content: `🗑️ Deleted homework ${id}.`, ephemeral: true });
       }
 
@@ -147,6 +145,7 @@ module.exports = {
         homeworks[newId] = clone;
         homeworkStatus[newId] = {};
         saveJSON(HOMEWORK_FILE, homeworks);
+        await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
         return interaction.reply({ content: `✅ Homework copied as ${newId}`, ephemeral: true });
       }
 
@@ -154,7 +153,11 @@ module.exports = {
         const list = Object.values(homeworks);
         if (!list.length) return interaction.reply({ content: '📭 No homework entries found.', ephemeral: true });
 
-        const text = list.map(hw => `**${hw.id}** → ${hw.title} | due: ${hw.due_date}`).join('\n');
+        const text = list.map(hw => {
+          const doneUsers = homeworkStatus[hw.id] ? Object.keys(homeworkStatus[hw.id]).length : 0;
+          return `**${hw.id}** → ${hw.title} | due: ${hw.due_date} | marked done: ${doneUsers}`;
+        }).join('\n');
+
         return interaction.reply({ content: `📝 Homework List:\n${text}`, ephemeral: true });
       }
 
@@ -173,7 +176,6 @@ module.exports = {
             console.warn(`⚠️ Failed to update homework ${id}:`, err.message);
           }
         }
-
         return interaction.reply({ content: `✅ Refreshed ${updated.length} homework embed(s).`, ephemeral: true });
       }
     }
