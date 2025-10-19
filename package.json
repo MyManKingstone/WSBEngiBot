@@ -4,7 +4,7 @@
   "description": "Discord bot for WSB Engineering",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "index.js"
   },
   "engines": {
     "node": "22.x"
