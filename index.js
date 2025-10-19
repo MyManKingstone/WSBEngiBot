@@ -9,7 +9,10 @@ const {
     EmbedBuilder,
     PermissionsBitField,
     REST,
-    Routes
+    Routes,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } = require('discord.js');
 
 const express = require('express');
@@ -75,6 +78,7 @@ const client = new Client({
 const DROPDOWN_PATH = 'data/dropdowns.json';
 const SCHEDULE_PATH = 'data/schedules.json';
 const CONFIG_PATH = 'data/schedule_config.json';
+const HOMEWORK_PATH = 'data/homeworks.json';
 
 // ---------- Persistent Data ----------
 let dropdownMappings = {};
@@ -93,6 +97,14 @@ let scheduleConfig = {
 };
 let scheduleConfigSHA = null;
 
+let homeworks = {};
+let homeworksSHA = null;
+
+let homeworkConfig = {
+    channelId: ''
+};
+let homeworkConfigSHA = null;
+
 // ---------- Load all JSON from GitHub ----------
 (async () => {
     try {
@@ -108,6 +120,15 @@ let scheduleConfigSHA = null;
         scheduleConfig = configData.json;
         scheduleConfigSHA = configData.sha;
 
+        const homeworkData = await fetchJSON(HOMEWORK_PATH);
+        homeworks = homeworkData.json;
+        homeworksSHA = homeworkData.sha;
+
+        // Load homework config from schedule config for now (can be separated later)
+        homeworkConfig = {
+            channelId: scheduleConfig.homeworkChannelId || ''
+        };
+
         console.log('✅ GitHub JSON files loaded successfully');
     } catch (err) {
         console.error('⚠️ Failed to fetch JSON from GitHub:', err);
@@ -122,6 +143,14 @@ async function saveSchedules() {
     schedulesSHA = await writeJSON(SCHEDULE_PATH, schedules, schedulesSHA);
 }
 async function saveConfig() {
+    scheduleConfigSHA = await writeJSON(CONFIG_PATH, scheduleConfig, scheduleConfigSHA);
+}
+async function saveHomeworks() {
+    homeworksSHA = await writeJSON(HOMEWORK_PATH, homeworks, homeworksSHA);
+}
+async function saveHomeworkConfig() {
+    // Save homework config to schedule config for now
+    scheduleConfig.homeworkChannelId = homeworkConfig.channelId;
     scheduleConfigSHA = await writeJSON(CONFIG_PATH, scheduleConfig, scheduleConfigSHA);
 }
 
@@ -295,6 +324,68 @@ const commands = [{
                 required: true
             }
         ]
+    },
+    // Homework commands
+    {
+        name: 'homework_menu',
+        description: 'Admin only - Open homework builder menu'
+    },
+    {
+        name: 'homework_list',
+        description: 'Admin only - List saved homework assignments'
+    },
+    {
+        name: 'homework_edit',
+        description: 'Admin only - Edit homework field',
+        options: [{
+                name: 'id',
+                type: 3,
+                description: 'Homework ID',
+                required: true
+            },
+            {
+                name: 'field',
+                type: 3,
+                description: 'Field to edit',
+                required: true
+            },
+            {
+                name: 'value',
+                type: 3,
+                description: 'New value',
+                required: true
+            }
+        ]
+    },
+    {
+        name: 'homework_delete',
+        description: 'Admin only - Delete a homework by ID',
+        options: [{
+            name: 'id',
+            type: 3,
+            description: 'Homework ID to delete',
+            required: true
+        }]
+    },
+    {
+        name: 'homework_copy',
+        description: 'Admin only - Copy an existing homework',
+        options: [{
+            name: 'id',
+            type: 3,
+            description: 'Homework ID to copy',
+            required: true
+        }]
+    },
+    {
+        name: 'homework_addchannel',
+        description: 'Set homework posting channel',
+        options: [{
+            name: 'channel',
+            type: 7,
+            description: 'Choose a channel',
+            required: true
+        }]
     }
 ];
 
@@ -343,6 +434,10 @@ client.on('interactionCreate', async (interaction) => {
                 }, {
                     name: '🧰 Schedule Management',
                     value: '`/schedule_list`, `/schedule_edit`, `/schedule_delete`, `/schedule_copy`',
+                    inline: false
+                }, {
+                    name: '📝 Homework Builder & Management',
+                    value: '`/homework_menu`, `/homework_list`, `/homework_edit`, `/homework_delete`, `/homework_copy`, `/homework_addchannel`',
                     inline: false
                 }, );
             return interaction.reply({
@@ -401,10 +496,7 @@ client.on('interactionCreate', async (interaction) => {
                 };
                 await saveDropdowns();
 
-                return interaction.reply({
-                    content: `✅ Dropdown created! ID: \`${customId}\``,
-                    ephemeral: true
-                });
+                return ephemeralReplyWithDelete(interaction, `✅ Dropdown created! ID: \`${customId}\``);
             }
 
             if (interaction.commandName === 'listdropdowns') {
@@ -433,10 +525,19 @@ client.on('interactionCreate', async (interaction) => {
                 } catch {}
                 delete dropdownMappings[id];
                 await saveDropdowns();
-                return interaction.reply({
-                    content: `✅ Dropdown \`${id}\` deleted.`,
+                return ephemeralReplyWithDelete(interaction, `✅ Dropdown \`${id}\` deleted.`);
+            }
+
+            // ---------- HOMEWORK CHANNEL CONFIG ----------
+            if (interaction.commandName === 'homework_addchannel') {
+                const channel = interaction.options.getChannel('channel');
+                if (!channel) return interaction.reply({
+                    content: '⚠️ Invalid channel.',
                     ephemeral: true
                 });
+                homeworkConfig.channelId = channel.id;
+                await saveHomeworkConfig();
+                return ephemeralReplyWithDelete(interaction, `✅ Homework posting channel set to ${channel}`);
             }
 
             // ---------- SCHEDULE CONFIG COMMANDS ----------
@@ -452,10 +553,7 @@ client.on('interactionCreate', async (interaction) => {
                     });
                     scheduleConfig.channelId = channel.id;
                     await saveConfig();
-                    return interaction.reply({
-                        content: `✅ Schedule posting channel set to ${channel}`,
-                        ephemeral: true
-                    });
+                    return ephemeralReplyWithDelete(interaction, `✅ Schedule posting channel set to ${channel}`);
                 }
 
                 const value = interaction.options.getString('name') || interaction.options.getString('date') || interaction.options.getString('time');
@@ -472,15 +570,9 @@ client.on('interactionCreate', async (interaction) => {
                 if (!scheduleConfig[key].includes(value)) {
                     scheduleConfig[key].push(value);
                     await saveConfig();
-                    return interaction.reply({
-                        content: `✅ Added **${value}** to \`${key}\``,
-                        ephemeral: true
-                    });
+                    return ephemeralReplyWithDelete(interaction, `✅ Added **${value}** to \`${key}\``);
                 } else {
-                    return interaction.reply({
-                        content: `ℹ️ **${value}** already exists in \`${key}\`.`,
-                        ephemeral: true
-                    });
+                    return ephemeralReplyWithDelete(interaction, `ℹ️ **${value}** already exists in \`${key}\`.`);
                 }
             }
         }
@@ -586,10 +678,7 @@ client.on('interactionCreate', async (interaction) => {
         const field = interaction.customId.replace('sched-step1-', '');
         state.step1[field] = interaction.values[0];
 
-        return interaction.reply({
-            content: `✅ Selected **${field}: ${interaction.values[0]}**`,
-            ephemeral: true
-        });
+        return ephemeralReplyWithDelete(interaction, `✅ Selected **${field}: ${interaction.values[0]}**`);
     }
 
     // ---------- STEP 1 NEXT BUTTON ----------
@@ -662,10 +751,7 @@ client.on('interactionCreate', async (interaction) => {
         const field = interaction.customId.replace('sched-step2-', '');
         state.step2[field] = interaction.values[0];
 
-        return interaction.reply({
-            content: `✅ Selected **${field}: ${interaction.values[0]}**`,
-            ephemeral: true
-        });
+        return ephemeralReplyWithDelete(interaction, `✅ Selected **${field}: ${interaction.values[0]}**`);
     }
 
     // ---------- STEP 2 CREATE BUTTON ----------
@@ -760,6 +846,236 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
     }
+
+    // ---------- HOMEWORK MENU ----------
+    if (interaction.isChatInputCommand() && interaction.commandName === 'homework_menu') {
+        if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+            return interaction.reply({
+                content: '🚫 Admins only.',
+                ephemeral: true
+            });
+        }
+
+        if (!homeworkConfig.channelId) {
+            return interaction.reply({
+                content: '⚠️ Homework channel not set. Use /homework_addchannel',
+                ephemeral: true
+            });
+        }
+
+        if (!scheduleConfig.professors.length || !scheduleConfig.classnames.length) {
+            return interaction.reply({
+                content: '⚠️ Populate professors and classnames first using schedule commands.',
+                ephemeral: true
+            });
+        }
+
+        // Step 1 menus: class, professor, type, turn-in method
+        const classMenu = new StringSelectMenuBuilder()
+            .setCustomId('hw-step1-classname')
+            .setPlaceholder('Select Class Name')
+            .addOptions(scheduleConfig.classnames.map(c => ({
+                label: c,
+                value: c
+            })));
+
+        const professorMenu = new StringSelectMenuBuilder()
+            .setCustomId('hw-step1-professor')
+            .setPlaceholder('Select Professor')
+            .addOptions(scheduleConfig.professors.map(p => ({
+                label: p,
+                value: p
+            })));
+
+        const typeMenu = new StringSelectMenuBuilder()
+            .setCustomId('hw-step1-type')
+            .setPlaceholder('Select Class Type')
+            .addOptions(Object.keys(CLASS_TYPE_COLORS).map(t => ({
+                label: t,
+                value: t
+            })));
+
+        const turnInMenu = new StringSelectMenuBuilder()
+            .setCustomId('hw-step1-turnin')
+            .setPlaceholder('Select Turn-in Method')
+            .addOptions([
+                { label: 'Email', value: 'Email' },
+                { label: 'Moodle', value: 'Moodle' },
+                { label: 'Teams', value: 'Teams' }
+            ]);
+
+        const row1 = new ActionRowBuilder().addComponents(classMenu);
+        const row2 = new ActionRowBuilder().addComponents(professorMenu);
+        const row3 = new ActionRowBuilder().addComponents(typeMenu);
+        const row4 = new ActionRowBuilder().addComponents(turnInMenu);
+
+        const nextButton = new ButtonBuilder()
+            .setCustomId('hw-step1-next')
+            .setLabel('➡️ Next')
+            .setStyle(ButtonStyle.Primary);
+        const row5 = new ActionRowBuilder().addComponents(nextButton);
+
+        await interaction.reply({
+            embeds: [new EmbedBuilder().setTitle('📝 Homework Builder – Step 1').setDescription('Select class name, professor, type, and turn-in method.')],
+            components: [row1, row2, row3, row4, row5],
+            ephemeral: true
+        });
+
+        // Initialize menuState for this user
+        menuState[interaction.user.id] = {
+            step1: {},
+            step2: {},
+            channelId: homeworkConfig.channelId
+        };
+    }
+
+    // ---------- HOMEWORK STEP 1 SELECT MENUS ----------
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('hw-step1-')) {
+        const userId = interaction.user.id;
+        const state = menuState[userId];
+        if (!state) return interaction.reply({
+            content: '⚠️ Menu session expired.',
+            ephemeral: true
+        });
+
+        const field = interaction.customId.replace('hw-step1-', '');
+        state.step1[field] = interaction.values[0];
+
+        return ephemeralReplyWithDelete(interaction, `✅ Selected **${field}: ${interaction.values[0]}**`);
+    }
+
+    // ---------- HOMEWORK STEP 1 NEXT BUTTON ----------
+    if (interaction.isButton() && interaction.customId === 'hw-step1-next') {
+        const userId = interaction.user.id;
+        const state = menuState[userId];
+        if (!state) return interaction.reply({
+            content: '⚠️ Menu session expired.',
+            ephemeral: true
+        });
+
+        const required = ['classname', 'professor', 'type', 'turnin'];
+        for (const f of required) {
+            if (!state.step1[f]) return interaction.reply({
+                content: `⚠️ Please select **${f}** before proceeding.`,
+                ephemeral: true
+            });
+        }
+
+        // Show modal for Step 2
+        const modal = new ModalBuilder()
+            .setCustomId('hw-step2-modal')
+            .setTitle('Homework Details');
+
+        const dueDateInput = new TextInputBuilder()
+            .setCustomId('hw-due-date')
+            .setLabel('Due Date (YYYY-MM-DD)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('2024-01-15')
+            .setRequired(true);
+
+        const descriptionInput = new TextInputBuilder()
+            .setCustomId('hw-description')
+            .setLabel('Description')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('Describe the homework assignment...')
+            .setRequired(true);
+
+        const row1 = new ActionRowBuilder().addComponents(dueDateInput);
+        const row2 = new ActionRowBuilder().addComponents(descriptionInput);
+
+        modal.addComponents(row1, row2);
+
+        await interaction.showModal(modal);
+    }
+
+    // ---------- HOMEWORK STEP 2 MODAL ----------
+    if (interaction.isModalSubmit() && interaction.customId === 'hw-step2-modal') {
+        const userId = interaction.user.id;
+        const state = menuState[userId];
+        if (!state) return interaction.reply({
+            content: '⚠️ Menu session expired.',
+            ephemeral: true
+        });
+
+        const dueDate = interaction.fields.getTextInputValue('hw-due-date');
+        const description = interaction.fields.getTextInputValue('hw-description');
+
+        // Validate date format
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(dueDate)) {
+            return interaction.reply({
+                content: '⚠️ Invalid date format. Use YYYY-MM-DD.',
+                ephemeral: true
+            });
+        }
+
+        const { classname, professor, type, turnin } = state.step1;
+        const color = CLASS_TYPE_COLORS[type] || 0x2f3136;
+
+        // Generate ID first
+        const id = `homework-${Date.now()}`;
+
+        const embed = new EmbedBuilder()
+            .setTitle(`📝 ${classname} - Homework`)
+            .addFields({
+                name: 'Professor',
+                value: professor,
+                inline: true
+            }, {
+                name: 'Type',
+                value: type,
+                inline: true
+            }, {
+                name: 'Turn-in Method',
+                value: turnin,
+                inline: true
+            }, {
+                name: 'Due Date',
+                value: dueDate,
+                inline: true
+            }, {
+                name: 'Description',
+                value: description,
+                inline: false
+            })
+            .setColor(color)
+            .setFooter({
+                text: `ID: ${id}`
+            });
+
+        try {
+            const ch = await client.channels.fetch(state.channelId);
+            const msg = await ch.send({
+                embeds: [embed]
+            });
+
+            // Save homework
+            homeworks[id] = {
+                classname,
+                professor,
+                type,
+                turnInMethod: turnin,
+                due: dueDate,
+                description,
+                channelId: ch.id,
+                messageId: msg.id,
+                createdBy: userId,
+                createdAt: new Date().toISOString()
+            };
+            await saveHomeworks();
+
+            // Cleanup menuState
+            delete menuState[userId];
+
+            await ephemeralReplyWithDelete(interaction, `✅ Homework created in <#${ch.id}> (ID: \`${id}\`).`);
+        } catch (err) {
+            console.error(err);
+            return interaction.reply({
+                content: '❌ Failed to post homework. Check bot permissions.',
+                ephemeral: true
+            });
+        }
+    }
 });
 
 // ---------- Helper: Ephemeral reply ----------
@@ -774,6 +1090,27 @@ async function ephemeralReply(interaction, contentOrEmbed) {
             content: contentOrEmbed,
             ephemeral: true
         });
+    }
+}
+
+// ---------- Helper: Ephemeral reply with auto-delete ----------
+async function ephemeralReplyWithDelete(interaction, contentOrEmbed, deleteAfter = 5000) {
+    if (contentOrEmbed instanceof EmbedBuilder) {
+        const reply = await interaction.reply({
+            embeds: [contentOrEmbed],
+            ephemeral: true
+        });
+        setTimeout(() => {
+            reply.delete().catch(() => {});
+        }, deleteAfter);
+    } else {
+        const reply = await interaction.reply({
+            content: contentOrEmbed,
+            ephemeral: true
+        });
+        setTimeout(() => {
+            reply.delete().catch(() => {});
+        }, deleteAfter);
     }
 }
 
@@ -802,10 +1139,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (roleId) await member.roles.add(roleId).catch(() => {});
             }
 
-            return interaction.reply({
-                content: '✅ Your roles have been updated.',
-                ephemeral: true
-            });
+            return ephemeralReplyWithDelete(interaction, '✅ Your roles have been updated.');
         }
 
         // ---------- /schedule_list ----------
@@ -898,7 +1232,7 @@ client.on('interactionCreate', async (interaction) => {
                     embeds: [embed]
                 });
                 await saveSchedules();
-                ephemeralReply(interaction, `✅ Schedule \`${id}\` updated successfully.`);
+                ephemeralReplyWithDelete(interaction, `✅ Schedule \`${id}\` updated successfully.`);
             } catch (err) {
                 console.error(err);
                 ephemeralReply(interaction, '❌ Failed to edit schedule embed. Check permissions.');
@@ -918,7 +1252,7 @@ client.on('interactionCreate', async (interaction) => {
 
             delete schedules[id];
             await saveSchedules();
-            ephemeralReply(interaction, `✅ Schedule \`${id}\` deleted successfully.`);
+            ephemeralReplyWithDelete(interaction, `✅ Schedule \`${id}\` deleted successfully.`);
         }
 
         // ---------- /schedule_copy ----------
@@ -969,10 +1303,184 @@ client.on('interactionCreate', async (interaction) => {
                     createdAt: new Date().toISOString()
                 };
                 await saveSchedules();
-                ephemeralReply(interaction, `✅ Schedule copied! New ID: \`${newId}\`.`);
+                ephemeralReplyWithDelete(interaction, `✅ Schedule copied! New ID: \`${newId}\`.`);
             } catch (err) {
                 console.error(err);
                 ephemeralReply(interaction, '❌ Failed to copy schedule. Check permissions.');
+            }
+        }
+
+        // ---------- /homework_list ----------
+        if (interaction.isChatInputCommand() && interaction.commandName === 'homework_list') {
+            await interaction.deferReply({
+                ephemeral: true
+            });
+
+            const ids = Object.keys(homeworks);
+            if (!ids.length) return interaction.editReply({
+                content: '📭 No homework assignments found.'
+            });
+
+            const chunks = [];
+            let currentDesc = '';
+
+            for (const id of ids) {
+                const h = homeworks[id];
+                const line = `• **${h.classname}** (ID: \`${id}\`) — Due: ${h.due} | ${h.type} | Prof: ${h.professor} | Turn-in: ${h.turnInMethod}\n`;
+                if ((currentDesc + line).length > 4000) {
+                    chunks.push(currentDesc);
+                    currentDesc = '';
+                }
+                currentDesc += line;
+            }
+            if (currentDesc) chunks.push(currentDesc);
+
+            for (let i = 0; i < chunks.length; i++) {
+                const embed = new EmbedBuilder()
+                    .setTitle(i === 0 ? '📝 Saved Homework Assignments' : '📝 Saved Homework Assignments (cont.)')
+                    .setDescription(chunks[i])
+                    .setColor(0x3498db);
+
+                if (i === 0) await interaction.editReply({
+                    embeds: [embed]
+                });
+                else await interaction.followUp({
+                    embeds: [embed],
+                    ephemeral: true
+                });
+            }
+        }
+
+        // ---------- /homework_edit ----------
+        if (interaction.isChatInputCommand() && interaction.commandName === 'homework_edit') {
+            const id = interaction.options.getString('id');
+            const field = interaction.options.getString('field').toLowerCase();
+            const value = interaction.options.getString('value');
+
+            if (!homeworks[id]) return ephemeralReply(interaction, '⚠️ Homework ID not found.');
+
+            const allowed = ['classname', 'professor', 'type', 'turninmethod', 'due', 'description'];
+            if (!allowed.includes(field)) return ephemeralReply(interaction, `⚠️ Field must be one of: ${allowed.join(', ')}`);
+
+            // Handle field name mapping
+            const fieldMap = {
+                'turninmethod': 'turnInMethod'
+            };
+            const actualField = fieldMap[field] || field;
+
+            homeworks[id][actualField] = value;
+
+            try {
+                const ch = await client.channels.fetch(homeworks[id].channelId);
+                const msg = await ch.messages.fetch(homeworks[id].messageId);
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`📝 ${homeworks[id].classname} - Homework`)
+                    .addFields({
+                        name: 'Professor',
+                        value: homeworks[id].professor,
+                        inline: true
+                    }, {
+                        name: 'Type',
+                        value: homeworks[id].type,
+                        inline: true
+                    }, {
+                        name: 'Turn-in Method',
+                        value: homeworks[id].turnInMethod,
+                        inline: true
+                    }, {
+                        name: 'Due Date',
+                        value: homeworks[id].due,
+                        inline: true
+                    }, {
+                        name: 'Description',
+                        value: homeworks[id].description,
+                        inline: false
+                    })
+                    .setColor(CLASS_TYPE_COLORS[homeworks[id].type] || 0x2f3136)
+                    .setFooter({
+                        text: `ID: ${id}`
+                    });
+
+                await msg.edit({
+                    embeds: [embed]
+                });
+                await saveHomeworks();
+                ephemeralReplyWithDelete(interaction, `✅ Homework \`${id}\` updated successfully.`);
+            } catch (err) {
+                console.error(err);
+                ephemeralReply(interaction, '❌ Failed to edit homework embed. Check permissions.');
+            }
+        }
+
+        // ---------- /homework_delete ----------
+        if (interaction.isChatInputCommand() && interaction.commandName === 'homework_delete') {
+            const id = interaction.options.getString('id');
+            if (!id || !homeworks[id]) return ephemeralReply(interaction, `⚠️ Homework ID \`${id}\` not found.`);
+
+            try {
+                const ch = await client.channels.fetch(homeworks[id].channelId);
+                const msg = await ch.messages.fetch(homeworks[id].messageId);
+                await msg.delete().catch(() => {});
+            } catch {}
+
+            delete homeworks[id];
+            await saveHomeworks();
+            ephemeralReplyWithDelete(interaction, `✅ Homework \`${id}\` deleted successfully.`);
+        }
+
+        // ---------- /homework_copy ----------
+        if (interaction.isChatInputCommand() && interaction.commandName === 'homework_copy') {
+            const id = interaction.options.getString('id');
+            if (!id || !homeworks[id]) return ephemeralReply(interaction, `⚠️ Homework ID \`${id}\` not found.`);
+
+            const original = homeworks[id];
+            const newId = `homework-${Date.now()}`;
+            try {
+                const ch = await client.channels.fetch(original.channelId);
+                const embed = new EmbedBuilder()
+                    .setTitle(`📝 ${original.classname} - Homework`)
+                    .addFields({
+                        name: 'Professor',
+                        value: original.professor,
+                        inline: true
+                    }, {
+                        name: 'Type',
+                        value: original.type,
+                        inline: true
+                    }, {
+                        name: 'Turn-in Method',
+                        value: original.turnInMethod,
+                        inline: true
+                    }, {
+                        name: 'Due Date',
+                        value: original.due,
+                        inline: true
+                    }, {
+                        name: 'Description',
+                        value: original.description,
+                        inline: false
+                    })
+                    .setColor(CLASS_TYPE_COLORS[original.type] || 0x2f3136)
+                    .setFooter({
+                        text: `ID: ${newId}`
+                    });
+
+                const msg = await ch.send({
+                    embeds: [embed]
+                });
+
+                homeworks[newId] = {
+                    ...original,
+                    messageId: msg.id,
+                    createdBy: interaction.user.id,
+                    createdAt: new Date().toISOString()
+                };
+                await saveHomeworks();
+                ephemeralReplyWithDelete(interaction, `✅ Homework copied! New ID: \`${newId}\`.`);
+            } catch (err) {
+                console.error(err);
+                ephemeralReply(interaction, '❌ Failed to copy homework. Check permissions.');
             }
         }
 
