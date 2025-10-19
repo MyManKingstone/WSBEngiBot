@@ -49,6 +49,22 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN)
   }
 })();
 
+// ------- Handle Per User Reactions -----------
+client.on('interactionCreate', async interaction => {
+  if (interaction.isButton() && interaction.customId.startsWith('markdone-')) {
+    const hwId = interaction.customId.split('-')[1];
+    if (!homeworkStatus[hwId]) homeworkStatus[hwId] = {};
+
+    const userId = interaction.user.id;
+    homeworkStatus[hwId][userId] = !homeworkStatus[hwId][userId]; // toggle done status
+
+    await interaction.reply({
+      content: homeworkStatus[hwId][userId] ? '✅ You marked this homework as done!' : '❌ You unmarked this homework.',
+      ephemeral: true
+    });
+  }
+});
+
 // ---- Handle interactions ----
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
