@@ -1,5 +1,5 @@
 // commands/homework.js
-const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, PermissionsBitField, ComponentType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
 const { homeworks, scheduleConfig, saveJSON, HOMEWORK_FILE, homeworkStatus, saveStatusJSON, HOMEWORK_STATUS_FILE } = require('../utils/storage');
 
 function generateId() {
@@ -33,20 +33,18 @@ module.exports = {
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
 
+    // Admin-only restriction for modification
     if (['add','edit','delete','copy','refresh'].includes(sub) &&
         !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({ content: '❌ You must be an admin to use this command.', ephemeral: true });
+      return interaction.reply({ content: '❌ You must be an admin to use this command.', flags: 64 });
     }
 
     const createEmbedRow = (hwId, title, description, due_date) => {
       const embed = new EmbedBuilder()
         .setTitle(`📝 ${title}`)
-        .setDescription(description)
+        .setDescription(description) // ID removed from description
         .setColor(0x5865F2)
-        .addFields(
-          { name: 'ID', value: hwId, inline: true },
-          { name: 'Due Date', value: due_date, inline: true }
-        )
+        .addFields({ name: 'Due Date', value: due_date, inline: true })
         .setFooter({ text: `Homework ID: ${hwId}` })
         .setTimestamp();
 
@@ -59,13 +57,14 @@ module.exports = {
       return { embed, row };
     };
 
-    // ---- Handle the button click globally ----
+    // ---- Handle per-user "Mark as Done" button ----
     if (interaction.isButton() && interaction.customId.startsWith('markdone-')) {
       const hwId = interaction.customId.split('-')[1];
+      if (!homeworks[hwId]) return interaction.reply({ content: '⚠️ Homework no longer exists.', flags: 64 });
       if (!homeworkStatus[hwId]) homeworkStatus[hwId] = {};
       homeworkStatus[hwId][interaction.user.id] = true;
       await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-      return interaction.reply({ content: '✅ Marked as done for you!', ephemeral: true });
+      return interaction.reply({ content: '✅ Marked as done for you!', flags: 64 });
     }
 
     switch(sub) {
@@ -76,8 +75,9 @@ module.exports = {
         const id = generateId();
 
         const { embed, row } = createEmbedRow(id, title, description, dueDate);
+
         const channel = await interaction.guild.channels.fetch(scheduleConfig.homeworkChannelId).catch(() => null);
-        if (!channel) return interaction.reply({ content: '⚠️ No homework channel configured.', ephemeral: true });
+        if (!channel) return interaction.reply({ content: '⚠️ No homework channel configured.', flags: 64 });
 
         const msg = await channel.send({ embeds: [embed], components: [row] });
         homeworks[id] = { id, title, description, due_date: dueDate, messageId: msg.id, channelId: msg.channel.id };
@@ -85,17 +85,16 @@ module.exports = {
         saveJSON(HOMEWORK_FILE, homeworks);
         await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
 
-        return interaction.reply({ content: `✅ Homework added with ID **${id}**`, ephemeral: true });
+        return interaction.reply({ content: `✅ Homework added with ID **${id}**`, flags: 64 });
       }
 
       case 'edit': {
         const id = interaction.options.getString('id');
         const field = interaction.options.getString('field');
         const value = interaction.options.getString('value');
+        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', flags: 64 });
 
-        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', ephemeral: true });
         homeworks[id][field] = value;
-
         const { embed, row } = createEmbedRow(id, homeworks[id].title, homeworks[id].description, homeworks[id].due_date);
 
         try {
@@ -103,16 +102,16 @@ module.exports = {
           const msg = await channel.messages.fetch(homeworks[id].messageId);
           await msg.edit({ embeds: [embed], components: [row] });
         } catch {
-          return interaction.reply({ content: '⚠️ Failed to update message.', ephemeral: true });
+          return interaction.reply({ content: '⚠️ Failed to update message.', flags: 64 });
         }
 
         saveJSON(HOMEWORK_FILE, homeworks);
-        return interaction.reply({ content: `✅ Updated ${field} for ${id}`, ephemeral: true });
+        return interaction.reply({ content: `✅ Updated ${field} for ${id}`, flags: 64 });
       }
 
       case 'delete': {
         const id = interaction.options.getString('id');
-        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', ephemeral: true });
+        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', flags: 64 });
 
         try {
           const channel = await interaction.guild.channels.fetch(homeworks[id].channelId);
@@ -124,19 +123,19 @@ module.exports = {
         delete homeworkStatus[id];
         saveJSON(HOMEWORK_FILE, homeworks);
         await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-        return interaction.reply({ content: `🗑️ Deleted homework ${id}.`, ephemeral: true });
+        return interaction.reply({ content: `🗑️ Deleted homework ${id}.`, flags: 64 });
       }
 
       case 'copy': {
         const id = interaction.options.getString('id');
-        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', ephemeral: true });
+        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', flags: 64 });
 
         const newId = generateId();
         const clone = { ...homeworks[id], id: newId };
         const { embed, row } = createEmbedRow(newId, clone.title, clone.description, clone.due_date);
 
         const channel = await interaction.guild.channels.fetch(scheduleConfig.homeworkChannelId).catch(() => null);
-        if (!channel) return interaction.reply({ content: '⚠️ Homework channel not configured.', ephemeral: true });
+        if (!channel) return interaction.reply({ content: '⚠️ Homework channel not configured.', flags: 64 });
 
         const msg = await channel.send({ embeds: [embed], components: [row] });
         clone.messageId = msg.id;
@@ -146,37 +145,40 @@ module.exports = {
         homeworkStatus[newId] = {};
         saveJSON(HOMEWORK_FILE, homeworks);
         await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-        return interaction.reply({ content: `✅ Homework copied as ${newId}`, ephemeral: true });
+        return interaction.reply({ content: `✅ Homework copied as ${newId}`, flags: 64 });
       }
 
       case 'list': {
         const list = Object.values(homeworks);
-        if (!list.length) return interaction.reply({ content: '📭 No homework entries found.', ephemeral: true });
+        if (!list.length) return interaction.reply({ content: '📭 No homework entries found.', flags: 64 });
+
+        // Ensure homeworkStatus exists for all entries
+        for (const hw of list) if (!homeworkStatus[hw.id]) homeworkStatus[hw.id] = {};
 
         const text = list.map(hw => {
-          const doneUsers = homeworkStatus[hw.id] ? Object.keys(homeworkStatus[hw.id]).length : 0;
-          return `**${hw.id}** → ${hw.title} | due: ${hw.due_date} | marked done: ${doneUsers}`;
+          const doneUsers = Object.keys(homeworkStatus[hw.id]).length;
+          return `**${hw.id || 'Unknown'}** → ${hw.title} | due: ${hw.due_date} | ✅ marked done: ${doneUsers}`;
         }).join('\n');
 
-        return interaction.reply({ content: `📝 Homework List:\n${text}`, ephemeral: true });
+        return interaction.reply({ content: `📝 Homework List:\n${text}`, flags: 64 });
       }
 
       case 'refresh': {
         const updated = [];
         for (const id in homeworks) {
           const hw = homeworks[id];
+          if (!hw) continue;
           try {
             const channel = await interaction.guild.channels.fetch(hw.channelId);
             const msg = await channel.messages.fetch(hw.messageId);
-
             const { embed, row } = createEmbedRow(id, hw.title, hw.description, hw.due_date);
             await msg.edit({ embeds: [embed], components: [row] });
             updated.push(id);
           } catch (err) {
-            console.warn(`⚠️ Failed to update homework ${id}:`, err.message);
+            console.warn(`⚠️ Failed to refresh homework ${id}:`, err.message);
           }
         }
-        return interaction.reply({ content: `✅ Refreshed ${updated.length} homework embed(s).`, ephemeral: true });
+        return interaction.reply({ content: `✅ Refreshed ${updated.length} homework embed(s).`, flags: 64 });
       }
     }
   }
