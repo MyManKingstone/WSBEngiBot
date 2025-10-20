@@ -72,8 +72,18 @@ module.exports = {
         )
         .addStringOption(opt => opt.setName('value').setDescription('New value').setRequired(true))
     )
-    .addSubcommand(sub => sub.setName('delete').setDescription('Delete a schedule entry').addStringOption(opt => opt.setName('id').setDescription('Class ID').setRequired(true))))
-    .addSubcommand(sub => sub.setName('copy').setDescription('Copy a schedule entry').addStringOption(opt => opt.setName('id').setDescription('Class ID').setRequired(true))))
+    .addSubcommand(sub =>
+      sub
+        .setName('delete')
+        .setDescription('Delete a schedule entry')
+        .addStringOption(opt => opt.setName('id').setDescription('Class ID').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('copy')
+        .setDescription('Copy a schedule entry')
+        .addStringOption(opt => opt.setName('id').setDescription('Class ID').setRequired(true))
+    )
     .addSubcommand(sub => sub.setName('list').setDescription('List all schedules'))
     .addSubcommand(sub => sub.setName('refresh').setDescription('Refresh schedule embeds')),
 
