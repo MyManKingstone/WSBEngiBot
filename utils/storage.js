@@ -1,4 +1,3 @@
-// utils/storage.js
 const fs = require('fs');
 const path = require('path');
 
@@ -11,6 +10,7 @@ const DROPDOWN_FILE = path.join(DATA_DIR, 'dropdowns.json');
 const SCHEDULE_FILE = path.join(DATA_DIR, 'schedules.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'schedule_config.json');
 const HOMEWORK_FILE = path.join(DATA_DIR, 'homeworks.json');
+const HOMEWORK_STATUS_FILE = path.join(DATA_DIR, 'homework_status.json'); // 🆕
 
 // ---- Helper functions ----
 function loadJSON(file, fallback = {}) {
@@ -34,6 +34,8 @@ function saveJSON(file, data) {
 const dropdownMappings = loadJSON(DROPDOWN_FILE, {});
 const schedules = loadJSON(SCHEDULE_FILE, {});
 const homeworks = loadJSON(HOMEWORK_FILE, {});
+const homeworkStatus = loadJSON(HOMEWORK_STATUS_FILE, {}); // 🆕
+
 const scheduleConfig = loadJSON(CONFIG_FILE, {
   professors: [],
   locations: [],
@@ -57,12 +59,16 @@ module.exports = {
   DROPDOWN_FILE,
   SCHEDULE_FILE,
   HOMEWORK_FILE,
+  HOMEWORK_STATUS_FILE, // 🆕
   CONFIG_FILE,
   dropdownMappings,
   schedules,
   homeworks,
+  homeworkStatus, // 🆕
   scheduleConfig,
   CLASS_TYPE_COLORS,
   loadJSON,
-  saveJSON
+  saveJSON,
+  // Helper alias for clarity
+  saveStatusJSON: saveJSON // 🆕
 };
