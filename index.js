@@ -21,11 +21,12 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
+// ---- Global temporary menu state ----
+const menuState = {};
+client.menuState = menuState;
+
 // Command map
 client.commands = new Map();
-
-// Menu session state
-const menuState = {};
 
 // ---------- Load Commands ----------
 const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
