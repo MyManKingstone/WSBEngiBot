@@ -7,71 +7,69 @@ function generateId() {
   return `class-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const createScheduleEmbed = (schedule) => {
+const createEmbed = (schedule) => {
   return new EmbedBuilder()
-    .setTitle('📘 Class Schedule')
+    .setTitle(schedule.name || '📘 Class Schedule')
     .setColor(getClassColor(schedule.type))
     .addFields(
-      { name: 'ID', value: schedule.id, inline: true },
       { name: 'Professor', value: schedule.professor || '—', inline: true },
       { name: 'Location', value: schedule.location || '—', inline: true },
       { name: 'Date', value: schedule.date || '—', inline: true },
       { name: 'Time', value: schedule.time || '—', inline: true },
       { name: 'Type', value: schedule.type || '—', inline: true }
-    );
+    )
+    .setFooter({ text: `ID: ${schedule.id}` });
 };
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('schedule')
     .setDescription('Manage class schedules')
-    .addSubcommand(sub =>
-      sub.setName('menu').setDescription('Admin only — Create a new schedule entry'))
-    .addSubcommand(sub =>
-      sub.setName('edit')
-        .setDescription('Edit an existing schedule')
-        .addStringOption(opt => opt.setName('id').setDescription('Class ID to edit').setRequired(true))
-        .addStringOption(opt => opt.setName('field').setDescription('Field to edit').setRequired(true)
-          .addChoices(
-            { name: 'Professor', value: 'professor' },
-            { name: 'Location', value: 'location' },
-            { name: 'Date', value: 'date' },
-            { name: 'Time', value: 'time' },
-            { name: 'Type of Class', value: 'type' }
-          ))
-        .addStringOption(opt => opt.setName('value').setDescription('New value').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('delete').setDescription('Delete a schedule entry')
-        .addStringOption(opt => opt.setName('id').setDescription('Class ID to delete').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('copy').setDescription('Copy a schedule entry')
-        .addStringOption(opt => opt.setName('id').setDescription('Class ID to copy').setRequired(true)))
-    .addSubcommand(sub =>
-      sub.setName('list').setDescription('List all schedules'))
-    .addSubcommand(sub =>
-      sub.setName('refresh').setDescription('Retroactively update all schedule embeds')),
+    .addSubcommand(sub => sub.setName('menu').setDescription('Admin only — Create a new schedule entry'))
+    .addSubcommand(sub => sub.setName('edit')
+      .setDescription('Edit an existing schedule')
+      .addStringOption(opt => opt.setName('id').setDescription('Class ID to edit').setRequired(true))
+      .addStringOption(opt => opt.setName('field').setDescription('Field to edit').setRequired(true)
+        .addChoices(
+          { name: 'Name', value: 'name' },
+          { name: 'Professor', value: 'professor' },
+          { name: 'Location', value: 'location' },
+          { name: 'Date', value: 'date' },
+          { name: 'Time', value: 'time' },
+          { name: 'Type of Class', value: 'type' }
+        ))
+      .addStringOption(opt => opt.setName('value').setDescription('New value').setRequired(true)))
+    .addSubcommand(sub => sub.setName('delete').setDescription('Delete a schedule entry')
+      .addStringOption(opt => opt.setName('id').setDescription('Class ID to delete').setRequired(true)))
+    .addSubcommand(sub => sub.setName('copy').setDescription('Copy a schedule entry')
+      .addStringOption(opt => opt.setName('id').setDescription('Class ID to copy').setRequired(true)))
+    .addSubcommand(sub => sub.setName('list').setDescription('List all schedules'))
+    .addSubcommand(sub => sub.setName('refresh').setDescription('Retroactively update all schedule embeds')),
 
   async execute(interaction) {
     try {
       const sub = interaction.options.getSubcommand();
 
-      if (['menu', 'edit', 'delete', 'copy', 'refresh'].includes(sub) &&
+      if (['menu','edit','delete','copy','refresh'].includes(sub) &&
           !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return interaction.reply({ content: '❌ You must be an admin to use this command.', ephemeral: true });
       }
 
       await interaction.deferReply({ ephemeral: true });
 
-      switch (sub) {
+      switch(sub) {
         case 'menu': {
           const id = generateId();
-          const embed = createScheduleEmbed({ id, professor: '', location: '', date: '', time: '', type: '' });
+          const schedule = { id, name: 'New Class', professor: '', location: '', date: '', time: '', type: '' };
+          const embed = createEmbed(schedule);
 
           const channel = await interaction.guild.channels.fetch(scheduleConfig.channelId).catch(() => null);
           if (!channel) return interaction.editReply({ content: '⚠️ No schedule channel configured.' });
 
           const msg = await channel.send({ embeds: [embed] });
-          schedules[id] = { id, professor: '', location: '', date: '', time: '', type: '', messageId: msg.id, channelId: msg.channel.id };
+          schedule.messageId = msg.id;
+          schedule.channelId = msg.channel.id;
+          schedules[id] = schedule;
           saveJSON(SCHEDULE_FILE, schedules);
 
           return interaction.editReply({ content: `✅ Schedule created with ID **${id}**` });
@@ -81,15 +79,19 @@ module.exports = {
           const id = interaction.options.getString('id');
           const field = interaction.options.getString('field');
           const value = interaction.options.getString('value');
-          if (!schedules[id]) return interaction.editReply({ content: '❌ No schedule found.' });
 
-          schedules[id][field] = value;
-          const updatedEmbed = createScheduleEmbed(schedules[id]);
+          const schedule = schedules[id];
+          if (!schedule) return interaction.editReply({ content: '❌ Schedule not found.' });
 
+          schedule[field] = value;
+          // ensure ID is present
+          if (!schedule.id) schedule.id = id;
+
+          const embed = createEmbed(schedule);
           try {
-            const channel = await interaction.guild.channels.fetch(schedules[id].channelId);
-            const msg = await channel.messages.fetch(schedules[id].messageId);
-            await msg.edit({ embeds: [updatedEmbed] });
+            const channel = await interaction.guild.channels.fetch(schedule.channelId);
+            const msg = await channel.messages.fetch(schedule.messageId);
+            await msg.edit({ embeds: [embed] });
           } catch {
             return interaction.editReply({ content: '⚠️ Failed to update message.' });
           }
@@ -100,11 +102,12 @@ module.exports = {
 
         case 'delete': {
           const id = interaction.options.getString('id');
-          if (!schedules[id]) return interaction.editReply({ content: '❌ Schedule not found.' });
+          const schedule = schedules[id];
+          if (!schedule) return interaction.editReply({ content: '❌ Schedule not found.' });
 
           try {
-            const channel = await interaction.guild.channels.fetch(schedules[id].channelId);
-            const msg = await channel.messages.fetch(schedules[id].messageId);
+            const channel = await interaction.guild.channels.fetch(schedule.channelId);
+            const msg = await channel.messages.fetch(schedule.messageId);
             await msg.delete().catch(() => null);
           } catch {}
 
@@ -115,11 +118,12 @@ module.exports = {
 
         case 'copy': {
           const id = interaction.options.getString('id');
-          if (!schedules[id]) return interaction.editReply({ content: '❌ Schedule not found.' });
+          const schedule = schedules[id];
+          if (!schedule) return interaction.editReply({ content: '❌ Schedule not found.' });
 
           const newId = generateId();
-          const clone = { ...schedules[id], id: newId };
-          const embed = createScheduleEmbed(clone);
+          const clone = { ...schedule, id: newId };
+          const embed = createEmbed(clone);
 
           const channel = await interaction.guild.channels.fetch(scheduleConfig.channelId).catch(() => null);
           if (!channel) return interaction.editReply({ content: '⚠️ Schedule channel not configured.' });
@@ -134,10 +138,14 @@ module.exports = {
         }
 
         case 'list': {
-          const list = Object.values(schedules);
+          const list = Object.entries(schedules);
           if (!list.length) return interaction.editReply({ content: '📭 No schedules found.' });
 
-          const text = list.map(s => `**${s.id}** → ${s.professor || '—'} | ${s.location || '—'} | ${s.date || '—'} ${s.time || ''} (${s.type || '—'})`).join('\n');
+          const text = list.map(([key, s]) => {
+            const id = s.id || key;
+            return `**${id}** → ${s.name || '—'} | ${s.professor || '—'} | ${s.location || '—'} | ${s.date || '—'} ${s.time || ''} (${s.type || '—'})`;
+          }).join('\n');
+
           return interaction.editReply({ content: `📘 Current schedules:\n${text}` });
         }
 
@@ -146,10 +154,11 @@ module.exports = {
           for (const id in schedules) {
             try {
               const schedule = schedules[id];
+              if (!schedule.id) schedule.id = id;
+              const embed = createEmbed(schedule);
+
               const channel = await interaction.guild.channels.fetch(schedule.channelId);
               const msg = await channel.messages.fetch(schedule.messageId);
-
-              const embed = createScheduleEmbed(schedule);
               await msg.edit({ embeds: [embed] });
               updated.push(id);
             } catch (err) {
@@ -167,5 +176,5 @@ module.exports = {
         await interaction.editReply({ content: '❌ An error occurred.' });
       }
     }
-  },
+  }
 };
