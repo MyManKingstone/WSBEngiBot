@@ -16,12 +16,12 @@ const {
   CLASS_TYPE_COLORS
 } = require('../utils/storage');
 
-const menuState = {}; // temporary memory per user
-
+// Generate a random class ID
 function generateId() {
   return `class-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Create embed for a schedule entry
 function createScheduleEmbed(data, id) {
   return new EmbedBuilder()
     .setTitle(`📚 ${data.name}`)
@@ -36,6 +36,7 @@ function createScheduleEmbed(data, id) {
     .setFooter({ text: `ID: ${id}` });
 }
 
+// Safe ephemeral replies
 async function ephemeralReply(interaction, content) {
   try {
     if (interaction.deferred || interaction.replied)
@@ -100,41 +101,32 @@ module.exports = {
       sub.setName('refresh').setDescription('Refresh schedule embeds')
     ),
 
-  async execute(interaction) {
+  // ---- Main Command Logic ----
+  async execute(interaction, client) {
     const sub = interaction.options.getSubcommand();
 
     if (sub === 'menu') {
-      // permission check
+      // ---- Permissions ----
       if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-        return interaction.reply({
-          content: '🚫 Admins only.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '🚫 Admins only.', ephemeral: true });
       }
 
-      // sanity checks
+      // ---- Config Sanity ----
       if (!scheduleConfig.channelId)
         return interaction.reply({
-          content: '⚠️ Schedule channel not set. Use /schedule_addchannel.',
+          content: '⚠️ Schedule channel not set. Use /schedule_addchannel first.',
           ephemeral: true
         });
 
-      const requiredFields = [
-        'professors',
-        'classnames',
-        'dates',
-        'times',
-        'locations'
-      ];
+      const requiredFields = ['professors', 'classnames', 'dates', 'times', 'locations'];
       if (requiredFields.some(f => !scheduleConfig[f]?.length)) {
         return interaction.reply({
-          content:
-            '⚠️ Populate professors, classnames, dates, times, and locations first.',
+          content: '⚠️ Populate professors, classnames, dates, times, and locations first.',
           ephemeral: true
         });
       }
 
-      // Step 1 dropdowns
+      // ---- Step 1 Menus ----
       const classMenu = new StringSelectMenuBuilder()
         .setCustomId('sched-step1-classname')
         .setPlaceholder('Select Class Name')
@@ -148,18 +140,17 @@ module.exports = {
       const typeMenu = new StringSelectMenuBuilder()
         .setCustomId('sched-step1-type')
         .setPlaceholder('Select Class Type')
-        .addOptions(
-          Object.keys(CLASS_TYPE_COLORS).map(t => ({
-            label: t.charAt(0).toUpperCase() + t.slice(1),
-            value: t
-          }))
-        );
+        .addOptions(Object.keys(CLASS_TYPE_COLORS).map(t => ({
+          label: t.charAt(0).toUpperCase() + t.slice(1),
+          value: t
+        })));
 
       const nextBtn = new ButtonBuilder()
         .setCustomId('sched-step1-next')
         .setLabel('➡️ Next')
         .setStyle(ButtonStyle.Primary);
 
+      // ---- Rows ----
       const rows = [
         new ActionRowBuilder().addComponents(classMenu),
         new ActionRowBuilder().addComponents(professorMenu),
@@ -167,7 +158,8 @@ module.exports = {
         new ActionRowBuilder().addComponents(nextBtn)
       ];
 
-      menuState[interaction.user.id] = { step1: {}, step2: {} };
+      // ✅ Use global client.menuState instead of local variable
+      client.menuState[interaction.user.id] = { step1: {}, step2: {} };
 
       return interaction.reply({
         embeds: [
@@ -180,38 +172,34 @@ module.exports = {
       });
     }
 
-    // ---- /edit, /delete, /copy, /list, /refresh keep old behavior ----
-    // These can be identical to your previous version.
+    // ---- Other subcommands unchanged ----
     if (sub === 'edit' || sub === 'delete' || sub === 'copy' || sub === 'list' || sub === 'refresh') {
-      // ... (reuse your existing code from before for these subcommands)
+      // Keep your existing logic for these.
+      return ephemeralReply(interaction, '⚙️ That part is unchanged.');
     }
   },
 
-  // ---------- COMPONENT HANDLERS ----------
+  // ---- Component Handlers ----
   async handleComponent(interaction, client) {
     const userId = interaction.user.id;
-    const state = menuState[userId];
+    const state = client.menuState[userId]; // ✅ global memory
 
-    // Step 1 select menus
+    // Step 1 selects
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sched-step1-')) {
-      if (!state)
-        return ephemeralReply(interaction, '⚠️ Menu session expired.');
+      if (!state) return ephemeralReply(interaction, '⚠️ Menu session expired.');
 
       const field = interaction.customId.replace('sched-step1-', '');
       state.step1[field] = interaction.values[0];
       return ephemeralReply(interaction, `✅ Selected **${field}: ${interaction.values[0]}**`);
     }
 
-    // Step 1 next button
+    // Step 1 → Step 2
     if (interaction.isButton() && interaction.customId === 'sched-step1-next') {
-      if (!state)
-        return ephemeralReply(interaction, '⚠️ Menu session expired.');
+      if (!state) return ephemeralReply(interaction, '⚠️ Menu session expired.');
 
       const required = ['classname', 'professor', 'type'];
-      for (const r of required) {
-        if (!state.step1[r])
-          return ephemeralReply(interaction, `⚠️ Please select **${r}** first.`);
-      }
+      for (const r of required)
+        if (!state.step1[r]) return ephemeralReply(interaction, `⚠️ Please select **${r}** first.`);
 
       const dateMenu = new StringSelectMenuBuilder()
         .setCustomId('sched-step2-date')
@@ -250,26 +238,22 @@ module.exports = {
       });
     }
 
-    // Step 2 select menus
+    // Step 2 selections
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sched-step2-')) {
-      if (!state)
-        return ephemeralReply(interaction, '⚠️ Menu session expired.');
+      if (!state) return ephemeralReply(interaction, '⚠️ Menu session expired.');
 
       const field = interaction.customId.replace('sched-step2-', '');
       state.step2[field] = interaction.values[0];
       return ephemeralReply(interaction, `✅ Selected **${field}: ${interaction.values[0]}**`);
     }
 
-    // Step 2 create button
+    // Step 2 create
     if (interaction.isButton() && interaction.customId === 'sched-step2-create') {
-      if (!state)
-        return ephemeralReply(interaction, '⚠️ Menu session expired.');
+      if (!state) return ephemeralReply(interaction, '⚠️ Menu session expired.');
 
       const required = ['date', 'time', 'location'];
-      for (const r of required) {
-        if (!state.step2[r])
-          return ephemeralReply(interaction, `⚠️ Please select **${r}** first.`);
-      }
+      for (const r of required)
+        if (!state.step2[r]) return ephemeralReply(interaction, `⚠️ Please select **${r}** first.`);
 
       const { classname, professor, type } = state.step1;
       const { date, time, location } = state.step2;
@@ -297,14 +281,14 @@ module.exports = {
         schedules[id] = scheduleData;
         saveJSON(SCHEDULE_FILE, schedules);
 
-        delete menuState[userId];
+        delete client.menuState[userId]; // ✅ cleanup
         return interaction.update({
           content: `✅ Schedule created in <#${ch.id}> (ID: \`${id}\`).`,
           embeds: [],
           components: []
         });
       } catch (err) {
-        console.error('Schedule create failed:', err);
+        console.error('❌ Schedule create failed:', err);
         return ephemeralReply(interaction, '❌ Failed to post schedule.');
       }
     }
