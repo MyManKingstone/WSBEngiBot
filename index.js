@@ -39,7 +39,9 @@ for (const file of commandFiles) {
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
 (async () => {
   try {
-    const slashCommands = Array.from(client.commands.values()).map(cmd => cmd.data.toJSON());
+    const slashCommands = Array.from(client.commands.values())
+  .filter(cmd => cmd.data && typeof cmd.data.toJSON === 'function')
+  .map(cmd => cmd.data.toJSON());
     await rest.put(
       Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
       { body: slashCommands }
