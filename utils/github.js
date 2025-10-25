@@ -1,52 +1,51 @@
 // utils/github.js
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+const { GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH, GITHUB_TOKEN } = require('../config');
 
-async function fetchJSON(path) {
-  const url = `https://api.github.com/repos/${process.env.GITHUB_OWNER}/${process.env.GITHUB_REPO}/contents/${path}?ref=${process.env.GITHUB_BRANCH}`;
-  
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `token ${process.env.GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github.v3+json'
-    }
-  });
-
-  if (!res.ok) {
-    console.error(`⚠️ Failed to fetch ${path}: ${res.statusText}`);
-    return { json: {}, sha: null };
-  }
-
-  const data = await res.json();
-  if (!data.content) return { json: {}, sha: null };
-
-  const json = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
-  return { json, sha: data.sha };
+// ✅ Universal fetch fix for CommonJS (works on Render)
+let fetch;
+try {
+  fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+} catch (e) {
+  console.warn('⚠️ Could not initialize node-fetch:', e);
 }
 
-async function writeJSON(path, json, sha = null) {
-  const url = `https://api.github.com/repos/${process.env.GITHUB_OWNER}/${process.env.GITHUB_REPO}/contents/${path}`;
-  const content = Buffer.from(JSON.stringify(json, null, 2)).toString('base64');
-
+async function fetchJSON(filePath) {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}?ref=${GITHUB_BRANCH}`;
   const res = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      Authorization: `token ${process.env.GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github.v3+json'
-    },
-    body: JSON.stringify({
-      message: `Update ${path}`,
-      content,
-      sha,
-      branch: process.env.GITHUB_BRANCH
-    })
+      headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+      }
   });
-
-  if (!res.ok) {
-    console.error(`⚠️ Failed to write ${path}: ${res.statusText}`);
-  }
-
   const data = await res.json();
-  return data.content?.sha || sha;
+  if (!data.content) return {
+      json: {},
+      sha: null
+  };
+  return {
+      json: JSON.parse(Buffer.from(data.content, 'base64').toString('utf-8')),
+      sha: data.sha
+  };
+}
+
+async function writeJSON(filePath, jsonData, sha) {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`;
+  const content = Buffer.from(JSON.stringify(jsonData, null, 2)).toString('base64');
+  const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json'
+      },
+      body: JSON.stringify({
+          message: `Update ${filePath}`,
+          content,
+          sha,
+          branch: GITHUB_BRANCH
+      })
+  });
+  const data = await res.json();
+  return data.content.sha;
 }
 
 module.exports = { fetchJSON, writeJSON };

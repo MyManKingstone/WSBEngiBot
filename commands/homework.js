@@ -1,185 +1,240 @@
 // commands/homework.js
-const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
-const { homeworks, scheduleConfig, saveJSON, HOMEWORK_FILE, homeworkStatus, saveStatusJSON, HOMEWORK_STATUS_FILE } = require('../utils/storage');
+const { 
+  StringSelectMenuBuilder, 
+  ActionRowBuilder, 
+  EmbedBuilder, 
+  ButtonBuilder, 
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} = require('discord.js');
+const { homeworks, homeworkConfig, scheduleConfig, saveHomeworks, saveHomeworkConfig } = require('../utils/storage');
+const { CLASS_TYPE_COLORS } = require('../config');
+const { ephemeralReply, ephemeralReplyWithDelete, generateId, validateDateFormat, splitIntoChunks } = require('../utils/helpers');
 
-function generateId() {
-  return `hw-${Math.random().toString(36).slice(2, 8)}`;
+// Global menu state for homework builder
+const menuState = {};
+
+// ---------- HOMEWORK CHANNEL CONFIG ----------
+async function handleHomeworkAddChannel(interaction) {
+  const channel = interaction.options.getChannel('channel');
+  if (!channel) return ephemeralReply(interaction, '⚠️ Invalid channel.');
+  
+  homeworkConfig.channelId = channel.id;
+  await saveHomeworkConfig();
+  return ephemeralReplyWithDelete(interaction, `✅ Homework posting channel set to ${channel}`);
+}
+
+// ---------- HOMEWORK MENU ----------
+async function handleHomeworkMenu(interaction) {
+  if (!homeworkConfig.channelId) {
+    return ephemeralReply(interaction, '⚠️ Homework channel not set. Use /homework_addchannel');
+  }
+
+  if (!scheduleConfig.professors.length || !scheduleConfig.classnames.length) {
+    return ephemeralReply(interaction, '⚠️ Populate professors and classnames first using schedule commands.');
+  }
+
+  // Step 1 menus: class, professor, type, turn-in method
+  const classMenu = new StringSelectMenuBuilder()
+    .setCustomId('hw-step1-classname')
+    .setPlaceholder('Select Class Name')
+    .addOptions(scheduleConfig.classnames.map(c => ({
+      label: c,
+      value: c
+    })));
+
+  const professorMenu = new StringSelectMenuBuilder()
+    .setCustomId('hw-step1-professor')
+    .setPlaceholder('Select Professor')
+    .addOptions(scheduleConfig.professors.map(p => ({
+      label: p,
+      value: p
+    })));
+
+  const typeMenu = new StringSelectMenuBuilder()
+    .setCustomId('hw-step1-type')
+    .setPlaceholder('Select Class Type')
+    .addOptions(Object.keys(CLASS_TYPE_COLORS).map(t => ({
+      label: t,
+      value: t
+    })));
+
+  const turnInMenu = new StringSelectMenuBuilder()
+    .setCustomId('hw-step1-turnin')
+    .setPlaceholder('Select Turn-in Method')
+    .addOptions([
+      { label: 'Email', value: 'Email' },
+      { label: 'Moodle', value: 'Moodle' },
+      { label: 'Teams', value: 'Teams' }
+    ]);
+
+  const row1 = new ActionRowBuilder().addComponents(classMenu);
+  const row2 = new ActionRowBuilder().addComponents(professorMenu);
+  const row3 = new ActionRowBuilder().addComponents(typeMenu);
+  const row4 = new ActionRowBuilder().addComponents(turnInMenu);
+
+  const nextButton = new ButtonBuilder()
+    .setCustomId('hw-step1-next')
+    .setLabel('➡️ Next')
+    .setStyle(ButtonStyle.Primary);
+  const row5 = new ActionRowBuilder().addComponents(nextButton);
+
+  await interaction.reply({
+    embeds: [new EmbedBuilder().setTitle('📝 Homework Builder – Step 1').setDescription('Select class name, professor, type, and turn-in method.')],
+    components: [row1, row2, row3, row4, row5],
+    ephemeral: true
+  });
+
+  // Initialize menuState for this user
+  menuState[interaction.user.id] = {
+    step1: {},
+    step2: {},
+    channelId: homeworkConfig.channelId
+  };
+}
+
+// ---------- HOMEWORK LIST ----------
+async function handleHomeworkList(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const ids = Object.keys(homeworks);
+  if (!ids.length) return interaction.editReply({ content: '📭 No homework assignments found.' });
+
+  const chunks = [];
+  let currentDesc = '';
+
+  for (const id of ids) {
+    const h = homeworks[id];
+    const line = `• **${h.classname}** (ID: \`${id}\`) — Due: ${h.due} | ${h.type} | Prof: ${h.professor} | Turn-in: ${h.turnInMethod}\n`;
+    if ((currentDesc + line).length > 4000) {
+      chunks.push(currentDesc);
+      currentDesc = '';
+    }
+    currentDesc += line;
+  }
+  if (currentDesc) chunks.push(currentDesc);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const embed = new EmbedBuilder()
+      .setTitle(i === 0 ? '📝 Saved Homework Assignments' : '📝 Saved Homework Assignments (cont.)')
+      .setDescription(chunks[i])
+      .setColor(0x3498db);
+
+    if (i === 0) await interaction.editReply({ embeds: [embed] });
+    else await interaction.followUp({ embeds: [embed], ephemeral: true });
+  }
+}
+
+// ---------- HOMEWORK EDIT ----------
+async function handleHomeworkEdit(interaction) {
+  const id = interaction.options.getString('id');
+  const field = interaction.options.getString('field').toLowerCase();
+  const value = interaction.options.getString('value');
+
+  if (!homeworks[id]) return ephemeralReply(interaction, '⚠️ Homework ID not found.');
+
+  const allowed = ['classname', 'professor', 'type', 'turninmethod', 'due', 'description'];
+  if (!allowed.includes(field)) return ephemeralReply(interaction, `⚠️ Field must be one of: ${allowed.join(', ')}`);
+
+  // Handle field name mapping
+  const fieldMap = {
+    'turninmethod': 'turnInMethod'
+  };
+  const actualField = fieldMap[field] || field;
+
+  homeworks[id][actualField] = value;
+
+  try {
+    const ch = await interaction.client.channels.fetch(homeworks[id].channelId);
+    const msg = await ch.messages.fetch(homeworks[id].messageId);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`📝 ${homeworks[id].classname} - Homework`)
+      .addFields(
+        { name: 'Professor', value: homeworks[id].professor, inline: true },
+        { name: 'Type', value: homeworks[id].type, inline: true },
+        { name: 'Turn-in Method', value: homeworks[id].turnInMethod, inline: true },
+        { name: 'Due Date', value: homeworks[id].due, inline: true },
+        { name: 'Description', value: homeworks[id].description, inline: false }
+      )
+      .setColor(CLASS_TYPE_COLORS[homeworks[id].type] || 0x2f3136)
+      .setFooter({ text: `ID: ${id}` });
+
+    await msg.edit({ embeds: [embed] });
+    await saveHomeworks();
+    ephemeralReplyWithDelete(interaction, `✅ Homework \`${id}\` updated successfully.`);
+  } catch (err) {
+    console.error(err);
+    ephemeralReply(interaction, '❌ Failed to edit homework embed. Check permissions.');
+  }
+}
+
+// ---------- HOMEWORK DELETE ----------
+async function handleHomeworkDelete(interaction) {
+  const id = interaction.options.getString('id');
+  if (!id || !homeworks[id]) return ephemeralReply(interaction, `⚠️ Homework ID \`${id}\` not found.`);
+
+  try {
+    const ch = await interaction.client.channels.fetch(homeworks[id].channelId);
+    const msg = await ch.messages.fetch(homeworks[id].messageId);
+    await msg.delete().catch(() => {});
+  } catch {}
+
+  delete homeworks[id];
+  await saveHomeworks();
+  ephemeralReplyWithDelete(interaction, `✅ Homework \`${id}\` deleted successfully.`);
+}
+
+// ---------- HOMEWORK COPY ----------
+async function handleHomeworkCopy(interaction) {
+  const id = interaction.options.getString('id');
+  if (!id || !homeworks[id]) return ephemeralReply(interaction, `⚠️ Homework ID \`${id}\` not found.`);
+
+  const original = homeworks[id];
+  const newId = generateId('homework');
+  try {
+    const ch = await interaction.client.channels.fetch(original.channelId);
+    const embed = new EmbedBuilder()
+      .setTitle(`📝 ${original.classname} - Homework`)
+      .addFields(
+        { name: 'Professor', value: original.professor, inline: true },
+        { name: 'Type', value: original.type, inline: true },
+        { name: 'Turn-in Method', value: original.turnInMethod, inline: true },
+        { name: 'Due Date', value: original.due, inline: true },
+        { name: 'Description', value: original.description, inline: false }
+      )
+      .setColor(CLASS_TYPE_COLORS[original.type] || 0x2f3136)
+      .setFooter({ text: `ID: ${newId}` });
+
+    const msg = await ch.send({ embeds: [embed] });
+
+    homeworks[newId] = {
+      ...original,
+      messageId: msg.id,
+      createdBy: interaction.user.id,
+      createdAt: new Date().toISOString()
+    };
+    await saveHomeworks();
+    ephemeralReplyWithDelete(interaction, `✅ Homework copied! New ID: \`${newId}\`.`);
+  } catch (err) {
+    console.error(err);
+    ephemeralReply(interaction, '❌ Failed to copy homework. Check permissions.');
+  }
 }
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('homework')
-    .setDescription('Manage homework and assignments')
-    .addSubcommand(sub => sub.setName('add').setDescription('Admin only — add a new homework')
-      .addStringOption(opt => opt.setName('title').setDescription('Homework title').setRequired(true))
-      .addStringOption(opt => opt.setName('description').setDescription('Homework details').setRequired(true))
-      .addStringOption(opt => opt.setName('due_date').setDescription('Due date (e.g. 2025-11-03)').setRequired(true)))
-    .addSubcommand(sub => sub.setName('edit').setDescription('Edit an existing homework')
-      .addStringOption(opt => opt.setName('id').setDescription('Homework ID').setRequired(true))
-      .addStringOption(opt => opt.setName('field').setDescription('Field to edit').setRequired(true)
-        .addChoices(
-          { name: 'Title', value: 'title' },
-          { name: 'Description', value: 'description' },
-          { name: 'Due Date', value: 'due_date' }
-        ))
-      .addStringOption(opt => opt.setName('value').setDescription('New value').setRequired(true)))
-    .addSubcommand(sub => sub.setName('delete').setDescription('Delete a homework entry')
-      .addStringOption(opt => opt.setName('id').setDescription('Homework ID').setRequired(true)))
-    .addSubcommand(sub => sub.setName('copy').setDescription('Copy a homework entry')
-      .addStringOption(opt => opt.setName('id').setDescription('Homework ID to copy').setRequired(true)))
-    .addSubcommand(sub => sub.setName('list').setDescription('List all homework entries'))
-    .addSubcommand(sub => sub.setName('refresh').setDescription('Retroactively update all homework embeds to the current style')),
-
-  async execute(interaction) {
-    const sub = interaction.options.getSubcommand();
-
-    // Admin-only restriction for modification
-    if (['add','edit','delete','copy','refresh'].includes(sub) &&
-        !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({ content: '❌ You must be an admin to use this command.', flags: 64 });
-    }
-
-    const createEmbedRow = (hwId, title, description, due_date) => {
-      const embed = new EmbedBuilder()
-        .setTitle(`📝 ${title}`)
-        .setDescription(description) // ID removed from description
-        .setColor(0x5865F2)
-        .addFields({ name: 'Due Date', value: due_date, inline: true })
-        .setFooter({ text: `Homework ID: ${hwId}` })
-        .setTimestamp();
-
-      const markDoneButton = new ButtonBuilder()
-        .setCustomId(`markdone-${hwId}`)
-        .setLabel('Mark as Done')
-        .setStyle(ButtonStyle.Success);
-
-      const row = new ActionRowBuilder().addComponents(markDoneButton);
-      return { embed, row };
-    };
-
-    // ---- Handle per-user "Mark as Done" button ----
-    if (interaction.isButton() && interaction.customId.startsWith('markdone-')) {
-      const hwId = interaction.customId.split('-')[1];
-      if (!homeworks[hwId]) return interaction.reply({ content: '⚠️ Homework no longer exists.', flags: 64 });
-      if (!homeworkStatus[hwId]) homeworkStatus[hwId] = {};
-      homeworkStatus[hwId][interaction.user.id] = true;
-      await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-      return interaction.reply({ content: '✅ Marked as done for you!', flags: 64 });
-    }
-
-    switch(sub) {
-      case 'add': {
-        const title = interaction.options.getString('title');
-        const description = interaction.options.getString('description');
-        const dueDate = interaction.options.getString('due_date');
-        const id = generateId();
-
-        const { embed, row } = createEmbedRow(id, title, description, dueDate);
-
-        const channel = await interaction.guild.channels.fetch(scheduleConfig.homeworkChannelId).catch(() => null);
-        if (!channel) return interaction.reply({ content: '⚠️ No homework channel configured.', flags: 64 });
-
-        const msg = await channel.send({ embeds: [embed], components: [row] });
-        homeworks[id] = { id, title, description, due_date: dueDate, messageId: msg.id, channelId: msg.channel.id };
-        homeworkStatus[id] = {};
-        saveJSON(HOMEWORK_FILE, homeworks);
-        await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-
-        return interaction.reply({ content: `✅ Homework added with ID **${id}**`, flags: 64 });
-      }
-
-      case 'edit': {
-        const id = interaction.options.getString('id');
-        const field = interaction.options.getString('field');
-        const value = interaction.options.getString('value');
-        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', flags: 64 });
-
-        homeworks[id][field] = value;
-        const { embed, row } = createEmbedRow(id, homeworks[id].title, homeworks[id].description, homeworks[id].due_date);
-
-        try {
-          const channel = await interaction.guild.channels.fetch(homeworks[id].channelId);
-          const msg = await channel.messages.fetch(homeworks[id].messageId);
-          await msg.edit({ embeds: [embed], components: [row] });
-        } catch {
-          return interaction.reply({ content: '⚠️ Failed to update message.', flags: 64 });
-        }
-
-        saveJSON(HOMEWORK_FILE, homeworks);
-        return interaction.reply({ content: `✅ Updated ${field} for ${id}`, flags: 64 });
-      }
-
-      case 'delete': {
-        const id = interaction.options.getString('id');
-        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', flags: 64 });
-
-        try {
-          const channel = await interaction.guild.channels.fetch(homeworks[id].channelId);
-          const msg = await channel.messages.fetch(homeworks[id].messageId);
-          await msg.delete().catch(() => null);
-        } catch {}
-
-        delete homeworks[id];
-        delete homeworkStatus[id];
-        saveJSON(HOMEWORK_FILE, homeworks);
-        await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-        return interaction.reply({ content: `🗑️ Deleted homework ${id}.`, flags: 64 });
-      }
-
-      case 'copy': {
-        const id = interaction.options.getString('id');
-        if (!homeworks[id]) return interaction.reply({ content: '❌ Homework not found.', flags: 64 });
-
-        const newId = generateId();
-        const clone = { ...homeworks[id], id: newId };
-        const { embed, row } = createEmbedRow(newId, clone.title, clone.description, clone.due_date);
-
-        const channel = await interaction.guild.channels.fetch(scheduleConfig.homeworkChannelId).catch(() => null);
-        if (!channel) return interaction.reply({ content: '⚠️ Homework channel not configured.', flags: 64 });
-
-        const msg = await channel.send({ embeds: [embed], components: [row] });
-        clone.messageId = msg.id;
-        clone.channelId = msg.channel.id;
-
-        homeworks[newId] = clone;
-        homeworkStatus[newId] = {};
-        saveJSON(HOMEWORK_FILE, homeworks);
-        await saveStatusJSON(HOMEWORK_STATUS_FILE, homeworkStatus);
-        return interaction.reply({ content: `✅ Homework copied as ${newId}`, flags: 64 });
-      }
-
-      case 'list': {
-        const list = Object.values(homeworks);
-        if (!list.length) return interaction.reply({ content: '📭 No homework entries found.', flags: 64 });
-
-        // Ensure homeworkStatus exists for all entries
-        for (const hw of list) if (!homeworkStatus[hw.id]) homeworkStatus[hw.id] = {};
-
-        const text = list.map(hw => {
-          const doneUsers = Object.keys(homeworkStatus[hw.id]).length;
-          return `**${hw.id || 'Unknown'}** → ${hw.title} | due: ${hw.due_date} | ✅ marked done: ${doneUsers}`;
-        }).join('\n');
-
-        return interaction.reply({ content: `📝 Homework List:\n${text}`, flags: 64 });
-      }
-
-      case 'refresh': {
-        const updated = [];
-        for (const id in homeworks) {
-          const hw = homeworks[id];
-          if (!hw) continue;
-          try {
-            const channel = await interaction.guild.channels.fetch(hw.channelId);
-            const msg = await channel.messages.fetch(hw.messageId);
-            const { embed, row } = createEmbedRow(id, hw.title, hw.description, hw.due_date);
-            await msg.edit({ embeds: [embed], components: [row] });
-            updated.push(id);
-          } catch (err) {
-            console.warn(`⚠️ Failed to refresh homework ${id}:`, err.message);
-          }
-        }
-        return interaction.reply({ content: `✅ Refreshed ${updated.length} homework embed(s).`, flags: 64 });
-      }
-    }
-  }
+  // Config commands
+  handleHomeworkAddChannel,
+  
+  // Homework management
+  handleHomeworkMenu,
+  handleHomeworkList,
+  handleHomeworkEdit,
+  handleHomeworkDelete,
+  handleHomeworkCopy,
+  
+  // Menu state for homework builder
+  menuState
 };

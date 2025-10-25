@@ -1,74 +1,97 @@
-const fs = require('fs');
-const path = require('path');
+const { fetchJSON, writeJSON } = require('./github');
+const { 
+  DROPDOWN_PATH, 
+  SCHEDULE_PATH, 
+  CONFIG_PATH, 
+  HOMEWORK_PATH,
+  DEFAULT_SCHEDULE_CONFIG,
+  DEFAULT_HOMEWORK_CONFIG
+} = require('../config');
 
-// ---- Base data folder ----
-const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+// ---------- Persistent Data ----------
+let dropdownMappings = {};
+let dropdownSHA = null;
 
-// ---- File paths ----
-const DROPDOWN_FILE = path.join(DATA_DIR, 'dropdowns.json');
-const SCHEDULE_FILE = path.join(DATA_DIR, 'schedules.json');
-const CONFIG_FILE = path.join(DATA_DIR, 'schedule_config.json');
-const HOMEWORK_FILE = path.join(DATA_DIR, 'homeworks.json');
-const HOMEWORK_STATUS_FILE = path.join(DATA_DIR, 'homework_status.json'); // 🆕
+let schedules = {};
+let schedulesSHA = null;
 
-// ---- Helper functions ----
-function loadJSON(file, fallback = {}) {
+let scheduleConfig = { ...DEFAULT_SCHEDULE_CONFIG };
+let scheduleConfigSHA = null;
+
+let homeworks = {};
+let homeworksSHA = null;
+
+let homeworkConfig = { ...DEFAULT_HOMEWORK_CONFIG };
+let homeworkConfigSHA = null;
+
+// ---------- Load all JSON from GitHub ----------
+async function loadAllData() {
   try {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    const dropdownData = await fetchJSON(DROPDOWN_PATH);
+    dropdownMappings = dropdownData.json;
+    dropdownSHA = dropdownData.sha;
+
+    const scheduleData = await fetchJSON(SCHEDULE_PATH);
+    schedules = scheduleData.json;
+    schedulesSHA = scheduleData.sha;
+
+    const configData = await fetchJSON(CONFIG_PATH);
+    scheduleConfig = configData.json;
+    scheduleConfigSHA = configData.sha;
+
+    const homeworkData = await fetchJSON(HOMEWORK_PATH);
+    homeworks = homeworkData.json;
+    homeworksSHA = homeworkData.sha;
+
+    // Load homework config from schedule config for now (can be separated later)
+    homeworkConfig = {
+      channelId: scheduleConfig.homeworkChannelId || ''
+    };
+
+    console.log('✅ GitHub JSON files loaded successfully');
   } catch (err) {
-    console.error(`⚠️ Failed to load ${path.basename(file)}:`, err);
+    console.error('⚠️ Failed to fetch JSON from GitHub:', err);
   }
-  return fallback;
 }
 
-function saveJSON(file, data) {
-  try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error(`⚠️ Failed to save ${path.basename(file)}:`, err);
-  }
+// ---------- Save functions ----------
+async function saveDropdowns() {
+  dropdownSHA = await writeJSON(DROPDOWN_PATH, dropdownMappings, dropdownSHA);
 }
 
-// ---- Load all data ----
-const dropdownMappings = loadJSON(DROPDOWN_FILE, {});
-const schedules = loadJSON(SCHEDULE_FILE, {});
-const homeworks = loadJSON(HOMEWORK_FILE, {});
-const homeworkStatus = loadJSON(HOMEWORK_STATUS_FILE, {}); // 🆕
+async function saveSchedules() {
+  schedulesSHA = await writeJSON(SCHEDULE_PATH, schedules, schedulesSHA);
+}
 
-const scheduleConfig = loadJSON(CONFIG_FILE, {
-  professors: [],
-  locations: [],
-  classnames: [],
-  dates: [],
-  times: [],
-  channelId: '',
-  homeworkChannelId: '',
-});
+async function saveConfig() {
+  scheduleConfigSHA = await writeJSON(CONFIG_PATH, scheduleConfig, scheduleConfigSHA);
+}
 
-// ---- Shared constants ----
-const CLASS_TYPE_COLORS = {
-  lecture: 0x2ECC71, // green
-  lab: 0xE67E22,     // orange
-  seminar: 0x3498DB, // blue
-};
+async function saveHomeworks() {
+  homeworksSHA = await writeJSON(HOMEWORK_PATH, homeworks, homeworksSHA);
+}
 
-// ---- Exports ----
+async function saveHomeworkConfig() {
+  // Save homework config to schedule config for now
+  scheduleConfig.homeworkChannelId = homeworkConfig.channelId;
+  scheduleConfigSHA = await writeJSON(CONFIG_PATH, scheduleConfig, scheduleConfigSHA);
+}
+
 module.exports = {
-  DATA_DIR,
-  DROPDOWN_FILE,
-  SCHEDULE_FILE,
-  HOMEWORK_FILE,
-  HOMEWORK_STATUS_FILE, // 🆕
-  CONFIG_FILE,
+  // Data objects
   dropdownMappings,
   schedules,
-  homeworks,
-  homeworkStatus, // 🆕
   scheduleConfig,
-  CLASS_TYPE_COLORS,
-  loadJSON,
-  saveJSON,
-  // Helper alias for clarity
-  saveStatusJSON: saveJSON // 🆕
+  homeworks,
+  homeworkConfig,
+  
+  // Load function
+  loadAllData,
+  
+  // Save functions
+  saveDropdowns,
+  saveSchedules,
+  saveConfig,
+  saveHomeworks,
+  saveHomeworkConfig
 };
