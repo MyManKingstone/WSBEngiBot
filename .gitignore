@@ -1,4 +1,5 @@
 .env
 Book1.xlsx
 node_modules/
+killswitch.exe
 data/
