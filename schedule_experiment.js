@@ -36,7 +36,7 @@ function saveJSON(data) {
 
 // Funkcja do tworzenia embedów i wysyłania
 async function sendEmbeds(data) {
-    const channelId = '1454411252418740365';
+    const channelId = '1429221945441915000'; // Zmień na właściwe ID kanału
     const channel = await client.channels.fetch(channelId);
 
     for (const row of data) {
