@@ -1,0 +1,102 @@
+[
+  {
+    "date": "Sobota 10.01.2026",
+    "time": "08:00 - 10:00",
+    "subject": "Arkusze kalkulacyjne",
+    "professor": "mgr Martyna Duda",
+    "location": "11 sala w informacji i",
+    "type": "Egzamin/Zaliczenie",
+    "description": "2 termin zaliczenia, na Moodle",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_K2@1"
+  },
+  {
+    "date": "Sobota 17.01.2026",
+    "time": "13:10 - 14:40",
+    "subject": "Elementy elektrotechniki i elektroniki",
+    "professor": "dr inż. Piotr Woźniak",
+    "location": "A202 A",
+    "type": "Ćwiczenia",
+    "description": "Zajęcia w sali A202 Laboratorium automatyki sala bez zmian",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_K2"
+  },
+  {
+    "date": "Sobota 17.01.2026",
+    "time": "15:00 - 16:30",
+    "subject": "Elementy elektrotechniki i elektroniki",
+    "professor": "dr inż. Piotr Woźniak",
+    "location": "A202 A",
+    "type": "Ćwiczenia",
+    "description": "Zajęcia w sali A202 Laboratorium automatyki sala bez zmian",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_K2"
+  },
+  {
+    "date": "Sobota 17.01.2026",
+    "time": "16:40 - 18:10",
+    "subject": "Elementy elektrotechniki i elektroniki",
+    "professor": "dr inż. Piotr Woźniak",
+    "location": "A202 A",
+    "type": "Ćwiczenia",
+    "description": "Zajęcia w sali A202 Laboratorium automatyki sala bez zmian",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_K2"
+  },
+  {
+    "date": "Niedziela 18.01.2026",
+    "time": "08:00 - 09:30",
+    "subject": "Finanse",
+    "professor": "dr hab. Magdalena Redo",
+    "location": "03 on-line O",
+    "type": "Wykład",
+    "description": "",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_W"
+  },
+  {
+    "date": "Niedziela 18.01.2026",
+    "time": "09:40 - 11:10",
+    "subject": "Finanse",
+    "professor": "dr hab. Magdalena Redo",
+    "location": "04 on-line O",
+    "type": "Wykład",
+    "description": "",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_W"
+  },
+  {
+    "date": "Niedziela 18.01.2026",
+    "time": "11:20 - 12:50",
+    "subject": "Elementy elektrotechniki i elektroniki",
+    "professor": "dr Lidia Mosińska",
+    "location": "03 on-line O",
+    "type": "Wykład",
+    "description": "",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_W"
+  },
+  {
+    "date": "Niedziela 18.01.2026",
+    "time": "13:10 - 14:40",
+    "subject": "Elementy elektrotechniki i elektroniki",
+    "professor": "dr Lidia Mosińska",
+    "location": "05 on-line O",
+    "type": "Wykład",
+    "description": "",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_W"
+  },
+  {
+    "date": "Niedziela 18.01.2026",
+    "time": "15:00 - 16:30",
+    "subject": "Podstawy rysunku technicznego",
+    "professor": "dr inż. Wojciech Lewandowski",
+    "location": "03 on-line O",
+    "type": "Wykład",
+    "description": "",
+    "group": "Grupa: WŁ_IZA_inz_1_NS_W"
+  },
+  {
+    "date": "27.12.2025",
+    "time": "12:25 - 13:55",
+    "subject": "Testowe zajęcia",
+    "professor": "Testowy profesor",
+    "location": "Sala testowa",
+    "type": "Wykład",
+    "description": "Przykładowe wydarzenie do testów powiadomień",
+    "group": "Grupa: Testowa"
+  }
+]
