@@ -18,8 +18,19 @@ const {
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
 
 const express = require('express');
+
+// Kolory jak w oryginalnej komendzie
+const CLASS_TYPE_COLORS = {
+    'Wykład': 0x3db1ff,
+    'Ćwiczenia': 0xcc0088,
+    'E-Learning': 0xf1c40f,
+    'Egzamin/Zaliczenie': 0xff0000 // Dodany dla egzaminów
+};
+
+let notificationChannels = {}; // { guildId: channelId }
 const GITHUB_OWNER = process.env.GITHUB_OWNER;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH;
@@ -123,6 +134,9 @@ let statusSHA = null;
         botStatus = statusData.json;
         statusSHA = statusData.sha;
 
+        const notificationData = await fetchJSON('data/notification_channels.json');
+        notificationChannels = notificationData.json || {};
+
         console.log('✅ GitHub JSON files loaded successfully');
     } catch (err) {
         console.error('⚠️ Failed to fetch JSON from GitHub:', err);
@@ -142,13 +156,6 @@ async function saveConfig() {
 async function saveStatus() {
     statusSHA = await writeJSON(STATUS_PATH, botStatus, statusSHA);
 }
-
-// ---------- Class type colors ----------
-const CLASS_TYPE_COLORS = {
-    'Wyklad': 0x3db1ff,
-    'Cwiczenia': 0xcc0088,
-    'E-Learning': 0xf1c40f
-};
 
 // ---------- Global menu state ----------
 const menuState = {}; // keyed by userId
@@ -306,7 +313,27 @@ const commands = [{
     },
     {
         name: 'experiment_schedule',
-        description: 'Admin only - Run schedule experiment from Book1.xlsx'
+        description: 'Admin only - Run schedule experiment from Book1.xlsx',
+        options: [
+            {
+                name: 'channel',
+                type: 7, // CHANNEL
+                description: 'Channel to send embeds to (optional)',
+                required: false
+            }
+        ]
+    },
+    {
+        name: 'set_notification_channel',
+        description: 'Admin only - Set channel for schedule notifications',
+        options: [
+            {
+                name: 'channel',
+                type: 7, // CHANNEL
+                description: 'Channel for notifications',
+                required: true
+            }
+        ]
     }
 ];
 
@@ -318,7 +345,7 @@ const rest = new REST({
     try {
         console.log('Registering slash commands...');
         await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), {
+            Routes.applicationCommands(process.env.CLIENT_ID), {
                 body: commands
             }
         );
@@ -1060,20 +1087,37 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.deferReply({ ephemeral: true });
 
-            const { spawn } = require('child_process');
-            const child = spawn('node', ['schedule_experiment.js'], { cwd: __dirname });
+            const channelOption = interaction.options.get('channel');
+            const channelId = channelOption ? channelOption.value : '1454411252418740365'; // Domyślny kanał
 
-            child.on('exit', (code) => {
-                if (code === 0) {
-                    interaction.editReply('✅ Eksperyment harmonogramu zakończony pomyślnie.');
-                } else {
-                    interaction.editReply('❌ Błąd podczas eksperymentu harmonogramu.');
-                }
-            });
+            const success = await processScheduleExperiment(channelId);
+            if (success) {
+                interaction.editReply('✅ Eksperyment harmonogramu zakończony pomyślnie.');
+            } else {
+                interaction.editReply('❌ Błąd podczas eksperymentu harmonogramu.');
+            }
+        }
 
-            child.on('error', (err) => {
-                console.error('Child process error:', err);
-                interaction.editReply('❌ Błąd uruchomienia child process.');
+        // ---------- /set_notification_channel ----------
+        if (interaction.isChatInputCommand() && interaction.commandName === 'set_notification_channel') {
+            if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+                return interaction.reply({
+                    content: '🚫 Tylko administratorzy.',
+                    ephemeral: true
+                });
+            }
+
+            const channel = interaction.options.get('channel').value;
+            const guildId = interaction.guild.id;
+
+            // Zapisz do GitHub
+            const currentChannels = await fetchJSON('data/notification_channels.json');
+            currentChannels.json[guildId] = channel;
+            await updateJSON('data/notification_channels.json', currentChannels.json, currentChannels.sha);
+
+            await interaction.reply({
+                content: `✅ Kanał powiadomień ustawiony na <#${channel}>.`,
+                ephemeral: true
             });
         }
 
@@ -1090,11 +1134,115 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// ---------- Schedule Experiment Functions ----------
+function readExcel() {
+    const workbook = XLSX.readFile('Book1.xlsx');
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+    console.log('Odczytane dane:', data);
+    return data;
+}
+
+function saveJSON(data) {
+    const jsonFile = path.join(__dirname, 'data', 'schedule_experiment.json');
+    fs.writeFileSync(jsonFile, JSON.stringify(data, null, 2));
+    console.log('✅ Dane zapisane do schedule_experiment.json');
+}
+
+async function sendEmbeds(data, channelId) {
+    const channel = await client.channels.fetch(channelId);
+
+    for (const row of data) {
+        // Mapuj typ do koloru
+        const color = CLASS_TYPE_COLORS[row.type] || 0x0099FF; // Domyślny niebieski
+
+        const embed = new EmbedBuilder()
+            .setTitle(`📚 ${row.subject}`)
+            .addFields(
+                { name: 'Profesor', value: row.professor, inline: true },
+                { name: 'Lokalizacja', value: row.location, inline: true },
+                { name: 'Typ', value: row.type, inline: true },
+                { name: 'Data', value: row.date, inline: true },
+                { name: 'Czas', value: row.time, inline: true }
+            )
+            .setColor(color);
+
+        if (row.group) {
+            embed.addFields({ name: 'Grupa', value: row.group, inline: true });
+        }
+
+        if (row.description) {
+            embed.addFields({ name: 'Opis', value: row.description, inline: false });
+        }
+
+        await channel.send({ embeds: [embed] });
+    }
+
+    console.log(`✅ Wysłano ${data.length} embedów na kanał ${channelId}`);
+}
+
+async function processScheduleExperiment(channelId) {
+    try {
+        const data = readExcel();
+        const processedData = [];
+
+        for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            if (!row[0] || !row[1]) continue; // Pomiń puste wiersze
+
+            let date = row[0];
+            let time = row[1] || '';
+            let subject = row[2] || '';
+            let professor = row[3] || '';
+            let location = row[4] || '';
+            let type = row[5] || '';
+            let description = row[6] || '';
+            let group = '';
+
+            // Sprawdź następny wiersz dla daty lub grupy
+            if (i + 1 < data.length) {
+                const next = data[i + 1];
+                if (typeof next[0] === 'number') {
+                    // Parsuj datę Excel (46039 to 10.01.2026)
+                    const excelDate = new Date((next[0] - 25569) * 86400 * 1000);
+                    const formatted = excelDate.toLocaleDateString('pl-PL');
+                    if (date === 'Sobota' || date === 'Niedziela') {
+                        date += ' ' + formatted;
+                    }
+                }
+                if (next[3] && next[3].startsWith('Grupa:')) {
+                    group = next[3];
+                }
+            }
+            processedData.push({
+                date,
+                time,
+                subject,
+                professor,
+                location,
+                type,
+                description,
+                group
+            });
+        }
+
+        saveJSON(processedData);
+        await sendEmbeds(processedData, channelId);
+
+        console.log('✅ Eksperyment zakończony pomyślnie');
+        return true;
+    } catch (err) {
+        console.error('❌ Błąd:', err);
+        return false;
+    }
+}
+
 // ---------- Schedule Notifications ----------
 
 function startScheduleNotifications() {
     const schedulePath = path.join(__dirname, 'data', 'schedule_experiment.json');
-    const notificationChannelId = '1454411252418740365'; // Kanał do powiadomień
     const sentNotifications = new Set(); // Aby uniknąć duplikatów
 
     setInterval(async () => {
@@ -1113,32 +1261,39 @@ function startScheduleNotifications() {
 
                 // Sprawdź czy jest dokładnie czas (z tolerancją 1 minuty)
                 if (timeDiff <= 60 * 1000 && !sentNotifications.has(event.subject + event.time)) {
-                    const channel = await client.channels.fetch(notificationChannelId);
-                    if (channel) {
-                        const embed = new EmbedBuilder()
-                            .setTitle('⏰ Powiadomienie o zajęciach')
-                            .setDescription(`Za 1 godzinę rozpoczynają się zajęcia!`)
-                            .addFields(
-                                { name: '📚 Przedmiot', value: event.subject, inline: true },
-                                { name: '👨‍🏫 Prowadzący', value: event.professor, inline: true },
-                                { name: '📅 Data i czas', value: `${event.date} ${event.time}`, inline: true },
-                                { name: '📍 Lokalizacja', value: event.location, inline: true },
-                                { name: '🏷️ Typ', value: event.type, inline: true }
-                            )
-                            .setColor(0xffa500) // Pomarańczowy dla powiadomień
-                            .setTimestamp();
+                    // Wyślij na wszystkie skonfigurowane kanały
+                    for (const [guildId, channelId] of Object.entries(notificationChannels)) {
+                        try {
+                            const channel = await client.channels.fetch(channelId);
+                            if (channel) {
+                                const embed = new EmbedBuilder()
+                                    .setTitle('⏰ Powiadomienie o zajęciach')
+                                    .setDescription(`Za 1 godzinę rozpoczynają się zajęcia!`)
+                                    .addFields(
+                                        { name: '📚 Przedmiot', value: event.subject, inline: true },
+                                        { name: '👨‍🏫 Prowadzący', value: event.professor, inline: true },
+                                        { name: '📅 Data i czas', value: `${event.date} ${event.time}`, inline: true },
+                                        { name: '📍 Lokalizacja', value: event.location, inline: true },
+                                        { name: '🏷️ Typ', value: event.type, inline: true }
+                                    )
+                                    .setColor(0xffa500) // Pomarańczowy dla powiadomień
+                                    .setTimestamp();
 
-                        if (event.group) {
-                            embed.addFields({ name: '👥 Grupa', value: event.group, inline: true });
-                        }
-                        if (event.description) {
-                            embed.addFields({ name: '📝 Opis', value: event.description, inline: false });
-                        }
+                                if (event.group) {
+                                    embed.addFields({ name: '👥 Grupa', value: event.group, inline: true });
+                                }
+                                if (event.description) {
+                                    embed.addFields({ name: '📝 Opis', value: event.description, inline: false });
+                                }
 
-                        await channel.send({ embeds: [embed] });
-                        sentNotifications.add(event.subject + event.time);
-                        console.log(`📢 Wysłano powiadomienie dla: ${event.subject}`);
+                                await channel.send({ embeds: [embed] });
+                                console.log(`📢 Wysłano powiadomienie dla: ${event.subject} na kanał ${channelId}`);
+                            }
+                        } catch (err) {
+                            console.error(`❌ Błąd wysyłania na kanał ${channelId}:`, err);
+                        }
                     }
+                    sentNotifications.add(event.subject + event.time);
                 }
             }
         } catch (error) {
@@ -1173,8 +1328,40 @@ function parseDateTime(dateStr, timeStr) {
 // ---------- Keep-alive Express server for Render ----------
 const app = express();
 
+// Middleware for dashboard
+app.use(express.json());
+app.use(express.static('public'));
+app.set('view engine', 'ejs');
+
 // Simple health check
 app.get('/', (req, res) => res.send('Bot is running'));
+
+// Dashboard routes
+app.get('/dashboard', (req, res) => {
+    res.render('index');
+});
+
+app.get('/api/data/:file', async (req, res) => {
+    try {
+        const file = req.params.file;
+        const data = await fetchJSON(`data/${file}.json`);
+        res.json(data.json);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/data/:file', async (req, res) => {
+    try {
+        const file = req.params.file;
+        const newData = req.body;
+        const currentData = await fetchJSON(`data/${file}.json`);
+        const sha = await updateJSON(`data/${file}.json`, newData, currentData.sha);
+        res.json({ success: true, sha });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // Use Render's assigned port or default to 3000
 const PORT = process.env.PORT || 3000;
