@@ -12,7 +12,8 @@ const {
     Routes,
     ModalBuilder,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
+    ActivityType
 } = require('discord.js');
 
 require('dotenv').config();
@@ -67,21 +68,23 @@ async function fetchJSON(filePath) {
 async function writeJSON(filePath, jsonData, sha) {
     const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`;
     const content = Buffer.from(JSON.stringify(jsonData, null, 2)).toString('base64');
+    const body = {
+        message: `Update ${filePath}`,
+        content,
+        branch: GITHUB_BRANCH
+    };
+    if (sha) body.sha = sha;
     const res = await fetch(url, {
         method: 'PUT',
         headers: {
             'Authorization': `token ${GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json'
         },
-        body: JSON.stringify({
-            message: `Update ${filePath}`,
-            content,
-            sha,
-            branch: GITHUB_BRANCH
-        })
+        body: JSON.stringify(body)
     });
     const data = await res.json();
-    return data.content.sha;
+    if (!res.ok) throw new Error(`GitHub API error: ${res.status} ${data.message}`);
+    return data.commit.sha;
 }
 
 // ---------- Discord client ----------
@@ -136,6 +139,10 @@ let statusSHA = null;
 
         const notificationData = await fetchJSON('data/notification_channels.json');
         notificationChannels = notificationData.json || {};
+        if (!notificationData.sha) {
+            // Create the file if it doesn't exist
+            await writeJSON('data/notification_channels.json', {}, null);
+        }
 
         console.log('✅ GitHub JSON files loaded successfully');
     } catch (err) {
@@ -157,6 +164,31 @@ async function saveStatus() {
     statusSHA = await writeJSON(STATUS_PATH, botStatus, statusSHA);
 }
 
+// Announcements local helpers (use local data file)
+function loadAnnouncements() {
+    try {
+        const file = path.join(__dirname, 'data', 'announcements.json');
+        if (!fs.existsSync(file)) return { channels: [], lastAnnouncement: '' };
+        const raw = fs.readFileSync(file, 'utf-8');
+        return JSON.parse(raw);
+    } catch (e) {
+        console.error('Failed to load announcements.json', e);
+        return { channels: [], lastAnnouncement: '' };
+    }
+}
+
+function saveAnnouncements(obj) {
+    try {
+        const file = path.join(__dirname, 'data', 'announcements.json');
+        fs.writeFileSync(file, JSON.stringify(obj, null, 2), 'utf-8');
+        return true;
+    } catch (e) {
+        console.error('Failed to save announcements.json', e);
+        return false;
+    }
+}
+
+
 // ---------- Global menu state ----------
 const menuState = {}; // keyed by userId
 
@@ -172,6 +204,27 @@ const commands = [{
             name: 'activity',
             type: 3,
             description: 'Status activity text',
+            required: true
+        }]
+    },
+    {
+        name: 'activity',
+        description: 'Owner only - Set bot activity/game',
+        options: [{
+            name: 'type',
+            type: 3,
+            description: 'Activity type (playing, watching, listening, streaming)',
+            required: true,
+            choices: [
+                { name: 'Playing', value: 'playing' },
+                { name: 'Watching', value: 'watching' },
+                { name: 'Listening', value: 'listening' },
+                { name: 'Streaming', value: 'streaming' }
+            ]
+        }, {
+            name: 'name',
+            type: 3,
+            description: 'Activity name (e.g., "tf2", "YouTube")',
             required: true
         }]
     },
@@ -207,6 +260,28 @@ const commands = [{
     {
         name: 'listdropdowns',
         description: 'Admin only - List dropdowns'
+    },
+     {
+        name: 'announce',
+        description: 'Owner/Admin only - Announcements and channel management',
+        options: [
+            {
+                name: 'broadcast',
+                type: 1,
+                description: 'Send announcement to all configured channels',
+                options: [{ name: 'text', type: 3, description: 'Announcement text', required: true }]
+            },
+            {
+                name: 'channels',
+                type: 2,
+                description: 'Manage announcement channels',
+                options: [
+                    { name: 'add', type: 1, description: 'Add channel by ID', options: [{ name: 'id', type: 3, description: 'Channel ID', required: true }] },
+                    { name: 'remove', type: 1, description: 'Remove channel by ID', options: [{ name: 'id', type: 3, description: 'Channel ID', required: true }] },
+                    { name: 'list', type: 1, description: 'List configured announcement channels' }
+                ]
+            }
+        ]
     },
     {
         name: 'deletedropdown',
@@ -407,6 +482,36 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: `Status bota ustawiony na: ${activity}`, ephemeral: true });
         }
 
+        // ---------- ACTIVITY COMMAND ----------
+        if (interaction.isChatInputCommand() && interaction.commandName === 'activity') {
+            if (interaction.user.id !== process.env.OWNER_ID) {
+                return interaction.reply({ content: 'Tylko właściciel bota może używać tej komendy.', ephemeral: true });
+            }
+            const type = interaction.options.getString('type');
+            const name = interaction.options.getString('name');
+
+            let activityType;
+            switch (type.toLowerCase()) {
+                case 'playing':
+                    activityType = ActivityType.Playing;
+                    break;
+                case 'watching':
+                    activityType = ActivityType.Watching;
+                    break;
+                case 'listening':
+                    activityType = ActivityType.Listening;
+                    break;
+                case 'streaming':
+                    activityType = ActivityType.Streaming;
+                    break;
+                default:
+                    return interaction.reply({ content: 'Nieprawidłowy typ aktywności.', ephemeral: true });
+            }
+
+            client.user.setActivity(name, { type: activityType });
+            return interaction.reply({ content: `Aktywność bota ustawiona na: ${type} ${name}`, ephemeral: true });
+        }
+
         // Admin-only check for other commands
         if (!isAdmin && interaction.isChatInputCommand() && interaction.commandName !== 'help') {
             return interaction.reply({
@@ -472,7 +577,57 @@ client.on('interactionCreate', async (interaction) => {
                     ephemeral: true
                 });
             }
-
+             // ---------- ANNOUNCE COMMAND ----------
+            if (interaction.commandName === 'announce') {
+                try {
+                    const group = interaction.options.getSubcommandGroup(false);
+                    if (group === 'channels') {
+                        const sub = interaction.options.getSubcommand();
+                        const announcements = loadAnnouncements();
+                        if (sub === 'add') {
+                            const id = interaction.options.getString('id');
+                            if (!id) return interaction.reply({ content: '⚠️ Podaj ID kanału.', ephemeral: true });
+                            if (!announcements.channels.includes(id)) announcements.channels.push(id);
+                            saveAnnouncements(announcements);
+                            return interaction.reply({ content: `✅ Kanał ${id} dodany do listy ogłoszeń.`, ephemeral: true });
+                        }
+                        if (sub === 'remove') {
+                            const id = interaction.options.getString('id');
+                            if (!id) return interaction.reply({ content: '⚠️ Podaj ID kanału.', ephemeral: true });
+                            announcements.channels = announcements.channels.filter(c => c !== id);
+                            saveAnnouncements(announcements);
+                            return interaction.reply({ content: `✅ Kanał ${id} usunięty z listy ogłoszeń.`, ephemeral: true });
+                        }
+                        if (sub === 'list') {
+                            const list = announcements.channels.length ? announcements.channels.map(c => `• ${c}`).join('\n') : 'Brak skonfigurowanych kanałów.';
+                            return interaction.reply({ content: `📢 Kanały ogłoszeń:\n${list}`, ephemeral: true });
+                        }
+                    } else {
+                        // broadcast
+                        const text = interaction.options.getString('text') || '';
+                        if (!text) return interaction.reply({ content: '⚠️ Podaj treść ogłoszenia.', ephemeral: true });
+                        const announcements = loadAnnouncements();
+                        const channels = announcements.channels || [];
+                        if (!channels.length) return interaction.reply({ content: '⚠️ Brak skonfigurowanych kanałów ogłoszeń.', ephemeral: true });
+                        let sent = 0;
+                        for (const chId of channels) {
+                            try {
+                                const ch = await client.channels.fetch(chId).catch(() => null);
+                                if (ch && ch.send) {
+                                    await ch.send({ content: `📢 Ogłoszenie:\n${text}` });
+                                    sent++;
+                                }
+                            } catch (e) {}
+                        }
+                        announcements.lastAnnouncement = text;
+                        saveAnnouncements(announcements);
+                        return interaction.reply({ content: `✅ Wysłano ogłoszenie do ${sent} kanałów.`, ephemeral: true });
+                    }
+                } catch (err) {
+                    console.error('Announce error', err);
+                    return interaction.reply({ content: '❌ Błąd podczas wykonywania komendy announce.', ephemeral: true });
+                }
+            }
             if (interaction.commandName === 'deletedropdown') {
                 const id = interaction.options.getString('id');
                 if (!dropdownMappings[id]) return interaction.reply({
@@ -1145,6 +1300,58 @@ function readExcel() {
     return data;
 }
 
+function getProcessedSchedulesFromExcel() {
+    try {
+        const data = readExcel();
+        const processedData = [];
+
+        for (let i = 1; i < data.length; i++) {  // Zacznij od 1, aby pominąć headers
+            const row = data[i];
+            if (!row[0] || !row[1]) continue; // Pomiń puste wiersze
+
+            let date = row[0];
+            let time = row[1] || '';
+            let subject = row[3] || '';
+            let professor = row[5] || '';
+            let location = row[4] || '';
+            let type = row[2] || '';
+            let description = row[6] || '';
+            let group = '';
+
+            // Sprawdź następny wiersz dla daty lub grupy
+            if (i + 1 < data.length) {
+                const next = data[i + 1];
+                if (typeof next[0] === 'number') {
+                    // Parsuj datę Excel (46039 to 10.01.2026)
+                    const excelDate = new Date((next[0] - 25569) * 86400 * 1000);
+                    const formatted = excelDate.toLocaleDateString('pl-PL');
+                    date += ' ' + formatted;
+                }
+                // Znajdź pole z nazwą grupy w następnym wierszu (różne kolumny występują)
+                if (Array.isArray(next)) {
+                    const groupCell = next.find(c => typeof c === 'string' && c.startsWith('Grupa:'));
+                    if (groupCell) group = groupCell;
+                }
+            }
+            processedData.push({
+                date,
+                time,
+                subject,
+                professor,
+                location,
+                type,
+                description,
+                group
+            });
+        }
+
+        return processedData;
+    } catch (err) {
+        console.error('❌ Błąd podczas przetwarzania Excel:', err);
+        return [];
+    }
+}
+
 function saveJSON(data) {
     const jsonFile = path.join(__dirname, 'data', 'schedule_experiment.json');
     fs.writeFileSync(jsonFile, JSON.stringify(data, null, 2));
@@ -1344,8 +1551,13 @@ app.get('/dashboard', (req, res) => {
 app.get('/api/data/:file', async (req, res) => {
     try {
         const file = req.params.file;
-        const data = await fetchJSON(`data/${file}.json`);
-        res.json(data.json);
+        if (file === 'schedules') {
+            const data = getProcessedSchedulesFromExcel();
+            res.json(data);
+        } else {
+            const data = await fetchJSON(`data/${file}.json`);
+            res.json(data.json);
+        }
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1363,8 +1575,8 @@ app.put('/api/data/:file', async (req, res) => {
     }
 });
 
-// Use Render's assigned port or default to 3000
-const PORT = process.env.PORT || 3000;
+// Use Render's assigned port or default to 3001
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Webserver listening on port ${PORT}`));
 
 // ---------- Login Discord Bot ----------
